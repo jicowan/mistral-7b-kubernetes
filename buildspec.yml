@@ -1,0 +1,79 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-west-2
+    AWS_ACCOUNT_ID: ""  # Will be set automatically
+    ECR_REGISTRY: ""    # Will be constructed automatically
+  parameter-store:
+    # Optional: Store sensitive values in Parameter Store
+    # HUGGING_FACE_TOKEN: /mistral/huggingface-token
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_REGISTRY=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+      - echo Build started on `date`
+      - echo Creating ECR repositories if they don't exist...
+      - |
+        for repo in vllm-mistral-7b triton-vllm-mistral-7b neuron-mistral-7b vllm-mistral-7b-dlc neuron-mistral-7b-dlc triton-mistral-7b-dlc; do
+          aws ecr create-repository --repository-name $repo --region $AWS_DEFAULT_REGION 2>/dev/null || echo "Repository $repo already exists"
+        done
+
+  build:
+    commands:
+      - echo Build phase started on `date`
+      
+      # Build standard vLLM image
+      - echo "Building vLLM standard image..."
+      - docker build -f Dockerfile -t vllm-mistral-7b:latest -t $ECR_REGISTRY/vllm-mistral-7b:latest .
+      
+      # Build Neuron image
+      - echo "Building Neuron image..."
+      - docker build -f Dockerfile.neuron -t neuron-mistral-7b:latest -t $ECR_REGISTRY/neuron-mistral-7b:latest .
+      
+      # Build Triton image (basic version)
+      - echo "Building Triton image..."
+      - docker build -f Dockerfile.triton -t triton-vllm-mistral-7b:latest -t $ECR_REGISTRY/triton-vllm-mistral-7b:latest .
+      
+      # Build AWS DLC vLLM image
+      - echo "Building AWS DLC vLLM image..."
+      - docker build -f aws-dlc/Dockerfile.vllm-dlc -t vllm-mistral-7b-dlc:latest -t $ECR_REGISTRY/vllm-mistral-7b-dlc:latest .
+      
+      # Build AWS DLC Neuron image
+      - echo "Building AWS DLC Neuron image..."
+      - docker build -f aws-dlc/Dockerfile.neuron-dlc -t neuron-mistral-7b-dlc:latest -t $ECR_REGISTRY/neuron-mistral-7b-dlc:latest .
+      
+      # Build AWS DLC Triton image
+      - echo "Building AWS DLC Triton image..."
+      - docker build -f aws-dlc/Dockerfile.triton-complete -t triton-mistral-7b-dlc:latest -t $ECR_REGISTRY/triton-mistral-7b-dlc:latest .
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing images to ECR...
+      
+      # Push all images
+      - docker push $ECR_REGISTRY/vllm-mistral-7b:latest
+      - docker push $ECR_REGISTRY/neuron-mistral-7b:latest
+      - docker push $ECR_REGISTRY/triton-vllm-mistral-7b:latest
+      - docker push $ECR_REGISTRY/vllm-mistral-7b-dlc:latest
+      - docker push $ECR_REGISTRY/neuron-mistral-7b-dlc:latest
+      - docker push $ECR_REGISTRY/triton-mistral-7b-dlc:latest
+      
+      - echo "All images pushed successfully!"
+      - echo "Image URIs:"
+      - echo "  Standard vLLM: $ECR_REGISTRY/vllm-mistral-7b:latest"
+      - echo "  Standard Neuron: $ECR_REGISTRY/neuron-mistral-7b:latest"
+      - echo "  Standard Triton: $ECR_REGISTRY/triton-vllm-mistral-7b:latest"
+      - echo "  AWS DLC vLLM: $ECR_REGISTRY/vllm-mistral-7b-dlc:latest"
+      - echo "  AWS DLC Neuron: $ECR_REGISTRY/neuron-mistral-7b-dlc:latest"
+      - echo "  AWS DLC Triton: $ECR_REGISTRY/triton-mistral-7b-dlc:latest"
+
+artifacts:
+  files:
+    - '**/*'
+  name: mistral-7b-build-artifacts
