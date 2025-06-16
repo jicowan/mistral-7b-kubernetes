@@ -1,0 +1,71 @@
+# AWS Deep Learning Container for Triton + vLLM + Mistral 7B
+# Using AWS PyTorch Training DLC as base, then installing Triton
+FROM 763104351884.dkr.ecr.us-west-2.amazonaws.com/pytorch-training:2.1.0-gpu-py310-cu121-ubuntu20.04-sagemaker
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+
+# AWS DLC already includes:
+# - PyTorch 2.1.0 with CUDA 12.1
+# - Python 3.10
+# - CUDA toolkit and optimizations
+# - AWS-specific performance tunings
+
+# Install Triton Inference Server
+# Note: We'll install tritonclient and use Python backend approach
+RUN pip install --upgrade pip
+
+# Install Triton client libraries
+RUN pip install \
+    tritonclient[all]==2.40.0 \
+    numpy==1.24.3
+
+# Install vLLM and dependencies
+RUN pip install \
+    vllm==0.4.2 \
+    transformers==4.36.2 \
+    accelerate==0.24.1 \
+    sentencepiece==0.1.99
+
+# Install Triton Python backend dependencies
+RUN pip install \
+    triton-python-backend-utils
+
+# Alternative approach: Use NVIDIA Triton container with AWS optimizations
+# This is a hybrid approach - we'll document both options
+
+# Create model repository directory
+RUN mkdir -p /models
+
+# Create app directory
+WORKDIR /app
+
+# Copy model repository and application files
+COPY triton-model-repository/ /models/
+COPY requirements-triton.txt .
+
+# Install additional requirements
+RUN pip install -r requirements-triton.txt
+
+# Set model repository path
+ENV TRITON_MODEL_REPOSITORY=/models
+
+# Expose Triton ports
+EXPOSE 8000 8001 8002
+
+# Health check for Triton
+HEALTHCHECK --interval=30s --timeout=30s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:8000/v2/health/ready || exit 1
+
+# AWS DLC optimizations
+ENV NCCL_DEBUG=INFO
+ENV NCCL_SOCKET_IFNAME=^docker0,lo
+ENV OMP_NUM_THREADS=1
+
+# Note: This is a simplified approach. For production Triton deployment,
+# consider using the official NVIDIA Triton container with AWS optimizations
+# or AWS SageMaker Multi-Model Endpoints
+
+# Start Python-based server (alternative to full Triton server)
+CMD ["python", "-c", "print('Use official Triton container or implement Python backend server')"]

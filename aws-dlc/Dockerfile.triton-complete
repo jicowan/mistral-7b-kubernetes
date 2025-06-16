@@ -1,0 +1,87 @@
+# Complete Triton Implementation with AWS DLC Base
+# Using AWS PyTorch Training DLC as foundation, then adding Triton capabilities
+FROM 763104351884.dkr.ecr.us-west-2.amazonaws.com/pytorch-training:2.1.0-gpu-py310-cu121-ubuntu20.04-sagemaker
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TRITON_MODEL_REPOSITORY=/models
+ENV TRITON_LOG_VERBOSE=1
+
+# AWS DLC already includes:
+# - PyTorch 2.1.0 with CUDA 12.1
+# - Python 3.10
+# - CUDA toolkit and optimizations
+# - AWS-specific performance tunings
+# - NCCL, cuDNN optimizations
+
+# Install system dependencies for Triton
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    build-essential \
+    software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --upgrade pip
+
+# Install Triton Python backend and client libraries
+RUN pip install \
+    tritonclient[all]==2.40.0 \
+    triton-python-backend-utils \
+    numpy==1.24.3
+
+# Install vLLM and ML dependencies (compatible with PyTorch 2.1.0)
+RUN pip install \
+    vllm==0.4.2 \
+    transformers==4.36.2 \
+    accelerate==0.24.1 \
+    sentencepiece==0.1.99 \
+    fastapi==0.104.1 \
+    uvicorn[standard]==0.24.0 \
+    pydantic==2.5.0
+
+# Create directories
+RUN mkdir -p /models /app /opt/tritonserver
+
+# Set working directory
+WORKDIR /app
+
+# Copy Triton model repository structure
+COPY triton-model-repository/ /models/
+
+# Copy application files
+COPY triton_server_wrapper.py .
+COPY triton_health_check.py .
+COPY requirements-triton.txt .
+
+# Install additional requirements
+RUN pip install -r requirements-triton.txt
+
+# Create a simple Triton server wrapper since we're using Python backend
+# This approach uses the Python backend with vLLM integration
+COPY triton_python_backend.py /models/vllm_mistral/1/model.py
+
+# Set optimal environment variables for AWS DLC + Triton
+ENV NCCL_DEBUG=INFO
+ENV NCCL_SOCKET_IFNAME=^docker0,lo
+ENV CUDA_LAUNCH_BLOCKING=0
+ENV OMP_NUM_THREADS=1
+
+# Triton specific environment variables
+ENV TRITON_SERVER_CPU_ONLY=0
+ENV TRITON_SERVER_GPUS=0
+ENV TRITON_DISABLE_NVML=0
+
+# Expose Triton ports
+EXPOSE 8000 8001 8002
+
+# Health check using our custom health checker
+HEALTHCHECK --interval=30s --timeout=30s --start-period=120s --retries=3 \
+    CMD python triton_health_check.py || exit 1
+
+# Use our wrapper script that provides Triton-like functionality
+# with AWS DLC optimizations
+CMD ["python", "triton_server_wrapper.py"]

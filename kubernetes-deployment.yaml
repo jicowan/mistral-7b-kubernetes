@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-mistral-7b
+  labels:
+    app: vllm-mistral-7b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-mistral-7b
+  template:
+    metadata:
+      labels:
+        app: vllm-mistral-7b
+    spec:
+      containers:
+      - name: vllm-server
+        image: vllm-mistral-7b:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: MODEL_NAME
+          value: "mistralai/Mistral-7B-Instruct-v0.3"
+        - name: MAX_MODEL_LEN
+          value: "32768"
+        - name: GPU_MEMORY_UTILIZATION
+          value: "0.9"
+        - name: TENSOR_PARALLEL_SIZE
+          value: "1"
+        - name: TRUST_REMOTE_CODE
+          value: "true"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "8000"
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: "16Gi"
+            cpu: "4"
+          limits:
+            nvidia.com/gpu: 1
+            memory: "24Gi"
+            cpu: "8"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 30
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 30
+          failureThreshold: 3
+        volumeMounts:
+        - name: shm
+          mountPath: /dev/shm
+      volumes:
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 2Gi
+      nodeSelector:
+        # Uncomment and modify based on your node labels
+        # accelerator: nvidia-tesla-a10g  # For A10G nodes
+        # accelerator: nvidia-l4         # For L4 nodes
+        kubernetes.io/arch: amd64
+      tolerations:
+      # Add tolerations if your GPU nodes have taints
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-mistral-7b-service
+  labels:
+    app: vllm-mistral-7b
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: vllm-mistral-7b
+---
+# Optional: Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vllm-mistral-7b-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vllm-mistral-7b
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
