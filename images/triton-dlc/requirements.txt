@@ -1,7 +1,19 @@
-tritonclient[all]>=2.40.0
-triton-python-backend-utils
-numpy>=1.24.3
-requests>=2.31.0
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-pydantic>=2.6.0
+# Triton-compatible server with AWS DLC
+# Note: triton-python-backend-utils is not available as pip package
+# It's only available when using actual Triton Inference Server
+
+# Core dependencies for Triton-compatible API
+tritonclient[all]==2.40.0
+numpy==1.24.3
+requests==2.31.0
+
+# FastAPI server dependencies  
+fastapi==0.110.0
+uvicorn[standard]==0.27.0
+pydantic==2.6.0
+
+# vLLM and ML dependencies (compatible with AWS DLC PyTorch 2.6.0)
+vllm>=0.6.0
+transformers>=4.40.0
+accelerate>=0.28.0
+sentencepiece>=0.2.0

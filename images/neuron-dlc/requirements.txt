@@ -1,7 +1,16 @@
-tritonclient[all]>=2.40.0
-triton-python-backend-utils
+# AWS Neuron with AWS DLC
+# Note: AWS DLC Neuron images already include neuronx packages
+
+# FastAPI server dependencies
+fastapi==0.110.0
+uvicorn[standard]==0.27.0
+pydantic==2.6.0
+
+# Core ML dependencies
+transformers>=4.40.0
+accelerate>=0.28.0
+sentencepiece>=0.2.0
 numpy>=1.24.3
 requests>=2.31.0
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-pydantic>=2.6.0
+
+# Note: torch-neuronx and neuronx-distributed are pre-installed in AWS DLC Neuron images

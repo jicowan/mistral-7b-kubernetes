@@ -1,9 +1,18 @@
+# vLLM with NVIDIA GPUs
+# Using CUDA 12.9 base image with PyTorch 2.4+
+
+# Core vLLM and ML dependencies
 vllm>=0.6.0
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-pydantic>=2.6.0
+torch>=2.4.0
 transformers>=4.40.0
 accelerate>=0.28.0
 sentencepiece>=0.2.0
-torch>=2.4.0
+
+# FastAPI server dependencies
+fastapi==0.110.0
+uvicorn[standard]==0.27.0
+pydantic==2.6.0
+
+# Utilities
 requests>=2.31.0
+numpy>=1.24.3

@@ -27,21 +27,9 @@ RUN apt-get update && apt-get install -y \
 # Upgrade pip
 RUN pip install --upgrade pip
 
-# Install Triton Python backend and client libraries
-RUN pip install \
-    tritonclient[all]==2.40.0 \
-    triton-python-backend-utils \
-    numpy==1.24.3
-
-# Install vLLM and ML dependencies (compatible with PyTorch 2.1.0)
-RUN pip install \
-    vllm==0.4.2 \
-    transformers==4.36.2 \
-    accelerate==0.24.1 \
-    sentencepiece==0.1.99 \
-    fastapi==0.104.1 \
-    uvicorn[standard]==0.24.0 \
-    pydantic==2.5.0
+# Install dependencies from requirements file
+# Note: We don't install triton-python-backend-utils as it's not available via pip
+# This implementation uses a Triton-compatible API without actual Triton server
 
 # Create directories
 RUN mkdir -p /models /app /opt/tritonserver

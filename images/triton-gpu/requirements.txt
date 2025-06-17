@@ -1,7 +1,17 @@
-vllm>=0.4.0
-transformers>=4.36.0
-accelerate>=0.24.0
-sentencepiece>=0.1.99
-torch>=2.1.0
-tritonclient[all]>=2.40.0
-numpy>=1.24.0
+# Triton Inference Server with vLLM backend
+# Note: This uses actual NVIDIA Triton Inference Server base image
+# triton-python-backend-utils is pre-installed in the base image
+
+# vLLM and ML dependencies
+vllm>=0.6.0
+transformers>=4.40.0
+accelerate>=0.28.0
+sentencepiece>=0.2.0
+torch>=2.4.0
+
+# Triton client for testing
+tritonclient[all]==2.40.0
+numpy>=1.24.3
+requests>=2.31.0
+
+# Note: triton-python-backend-utils is provided by the Triton base image
