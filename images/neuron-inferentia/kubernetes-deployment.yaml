@@ -26,11 +26,11 @@ spec:
         - name: NEURON_CORES
           value: "2"  # Adjust based on instance type
         - name: MAX_LENGTH
-          value: "2048"  # Reduced for Inferentia
+          value: "4096"  # Reduced for Inferentia
         - name: BATCH_SIZE
           value: "1"
         - name: SEQUENCE_LENGTH
-          value: "2048"
+          value: "4096"
         - name: COMPILED_MODEL_PATH
           value: "/tmp/neuron_compiled_model"
         - name: HOST
@@ -40,7 +40,7 @@ spec:
         - name: NEURON_RT_NUM_CORES
           value: "2"
         - name: NEURON_CC_FLAGS
-          value: "--model-type=transformer --optlevel=2"
+          value: "--model-type=transformer-inference --optlevel=1"
         - name: HF_TOKEN
           valueFrom:
             secretKeyRef:
@@ -49,12 +49,12 @@ spec:
         resources:
           requests:
             aws.amazon.com/neuron: 1  # Request 1 Neuron device
-            # memory: "8Gi"
-            # cpu: "4"
+            # memory: "32Gi"
+            # cpu: "8"
           limits:
             aws.amazon.com/neuron: 1
-            # memory: "16Gi"
-            # cpu: "8"
+            # memory: "64Gi"
+            # cpu: "16"
         # readinessProbe:
         #   httpGet:
         #     path: /health
@@ -79,7 +79,7 @@ spec:
       volumes:
       - name: neuron-cache
         emptyDir:
-          sizeLimit: 10Gi  # Space for compiled model
+          sizeLimit: 20Gi  # Space for compiled model
       - name: neuron-device
         hostPath:
           path: /dev/neuron0
@@ -119,15 +119,15 @@ data:
     # Neuron Runtime Configuration
     NEURON_RT_NUM_CORES=2
     NEURON_RT_LOG_LEVEL=INFO
-    NEURON_CC_FLAGS=--model-type=transformer --optlevel=2
----
-# Optional: Pod Disruption Budget
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: neuron-mistral-7b-pdb
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: neuron-mistral-7b
+    NEURON_CC_FLAGS=--model-type=transformer-inference --optlevel=1
+# ---
+# # Optional: Pod Disruption Budget
+# apiVersion: policy/v1
+# kind: PodDisruptionBudget
+# metadata:
+#   name: neuron-mistral-7b-pdb
+# spec:
+#   minAvailable: 1
+#   selector:
+#     matchLabels:
+#       app: neuron-mistral-7b
