@@ -1,7 +1,7 @@
 # AWS Deep Learning Container for vLLM + Mistral 7B
 # Using AWS PyTorch Inference DLC with CUDA support
 # FROM 763104351884.dkr.ecr.us-west-2.amazonaws.com/pytorch-inference:2.1.0-gpu-py310-cu121-ubuntu20.04-ec2
-FROM 763104351884.dkr.ecr.us-east-1.amazonaws.com/pytorch-inference:2.6.0-gpu-py312-cu124-ubuntu22.04-ec2
+FROM 763104351884.dkr.ecr.us-west-2.amazonaws.com/pytorch-inference:2.6.0-gpu-py312-cu124-ubuntu22.04-ec2
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

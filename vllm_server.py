@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting vLLM engine initialization...")
     
     try:
-        # Configure engine arguments
+        # Configure engine arguments with optimizations for CUDA 12.9
         engine_args = AsyncEngineArgs(
             model=MODEL_NAME,
             max_model_len=MAX_MODEL_LEN,
@@ -69,6 +69,9 @@ async def lifespan(app: FastAPI):
             dtype="auto",  # Let vLLM choose the best dtype
             enforce_eager=False,  # Use CUDA graphs for better performance
             disable_log_stats=False,
+            # Enhanced settings for newer CUDA/vLLM versions
+            enable_prefix_caching=True,  # Better performance for repeated prompts
+            max_num_seqs=256,  # Increased batch size for better throughput
         )
         
         # Create the async engine

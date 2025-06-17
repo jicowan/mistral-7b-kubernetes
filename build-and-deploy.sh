@@ -34,7 +34,7 @@ echo "✅ Prerequisites check passed"
 
 # Build Docker image
 echo ""
-echo "2. Building Docker image..."
+echo "2. Building Docker image with CUDA 12.9..."
 docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
 
 if [ $? -eq 0 ]; then

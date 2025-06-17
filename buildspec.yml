@@ -27,8 +27,8 @@ phases:
     commands:
       - echo Build phase started on `date`
       
-      # Build standard vLLM image
-      - echo "Building vLLM standard image..."
+      # Build standard vLLM image with CUDA 12.9
+      - echo "Building vLLM standard image with CUDA 12.9..."
       - docker build -f Dockerfile -t vllm-mistral-7b:latest -t $ECR_REGISTRY/vllm-mistral-7b:latest .
       
       # Build Neuron image
