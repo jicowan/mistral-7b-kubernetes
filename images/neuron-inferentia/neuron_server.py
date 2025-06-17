@@ -388,45 +388,6 @@ async def generate_text(request: GenerateRequest):
     except Exception as e:
         logger.error(f"Request processing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
-                next_token = torch.multinomial(probs, num_samples=1)
-                
-                # Check for stop tokens
-                if next_token.item() == tokenizer.eos_token_id:
-                    break
-                
-                # Append to generated sequence
-                generated_ids = torch.cat([generated_ids, next_token], dim=-1)
-                
-                # Update attention mask
-                attention_mask = torch.cat([
-                    attention_mask, 
-                    torch.ones((1, 1), dtype=attention_mask.dtype)
-                ], dim=-1)
-        
-        # Decode generated text
-        generated_text = tokenizer.decode(
-            generated_ids[0][prompt_length:], 
-            skip_special_tokens=True
-        )
-        
-        # Calculate usage statistics
-        completion_tokens = generated_ids.shape[1] - prompt_length
-        total_tokens = generated_ids.shape[1]
-        
-        return GenerateResponse(
-            text=generated_text,
-            prompt=request.prompt,
-            model=MODEL_NAME,
-            usage={
-                "prompt_tokens": prompt_length,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens
-            }
-        )
-        
-    except Exception as e:
-        logger.error(f"Generation error: {e}")
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @app.get("/models")
 async def list_models():
