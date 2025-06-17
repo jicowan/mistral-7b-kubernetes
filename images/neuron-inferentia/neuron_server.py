@@ -57,83 +57,140 @@ class HealthResponse(BaseModel):
     device_type: str
 
 def compile_model_for_neuron():
-    """Compile the model for Neuron inference - Simplified version"""
-    logger.info("Starting simplified model compilation for Neuron...")
+    """Compile the model for Neuron inference - XLA-compatible version"""
+    logger.info("Starting XLA-compatible model compilation for Neuron...")
+    
+    try:
+        import torch_xla.core.xla_model as xm
+        import torch_xla.debug.metrics as met
+        logger.info("✅ XLA modules imported successfully")
+    except ImportError as e:
+        logger.error(f"❌ Failed to import XLA modules: {e}")
+        logger.info("🔄 Falling back to CPU model...")
+        return load_cpu_fallback_model()
     
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    # Load model in float32 first
-    logger.info("Loading model...")
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        torch_dtype=torch.float32,
-        low_cpu_mem_usage=True,
-        trust_remote_code=True
-    )
+    # Load model on CPU first, then move to XLA device
+    logger.info("Loading model on CPU first...")
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            torch_dtype=torch.float32,
+            low_cpu_mem_usage=True,
+            trust_remote_code=True
+        )
+        logger.info("✅ Model loaded on CPU")
+    except Exception as e:
+        logger.error(f"❌ Failed to load model: {e}")
+        return load_cpu_fallback_model()
     
-    # Use shorter sequence length for compilation to avoid tensor issues
-    COMPILE_SEQUENCE_LENGTH = 128  # Much shorter for stable compilation
+    # Use very short sequence length for compilation stability
+    COMPILE_SEQUENCE_LENGTH = 64  # Even shorter for XLA stability
     
-    # Prepare simple sample input for tracing (no past_key_values)
-    logger.info(f"Preparing sample input with sequence length {COMPILE_SEQUENCE_LENGTH}...")
-    sample_text = "Hello, how are you?"
-    sample_input = tokenizer(
-        sample_text, 
-        return_tensors="pt", 
-        max_length=COMPILE_SEQUENCE_LENGTH,
-        padding="max_length",
-        truncation=True
-    )
+    # Prepare sample input
+    logger.info(f"Preparing XLA-compatible sample input with sequence length {COMPILE_SEQUENCE_LENGTH}...")
+    sample_text = "Hello"  # Very simple text
     
-    logger.info("Starting Neuron compilation with simplified inputs...")
+    try:
+        sample_input = tokenizer(
+            sample_text, 
+            return_tensors="pt", 
+            max_length=COMPILE_SEQUENCE_LENGTH,
+            padding="max_length",
+            truncation=True
+        )
+        
+        # Move tensors to XLA device
+        device = xm.xla_device()
+        logger.info(f"Using XLA device: {device}")
+        
+        input_ids = sample_input['input_ids'].to(device)
+        attention_mask = sample_input['attention_mask'].to(device)
+        
+        logger.info("✅ Sample inputs prepared and moved to XLA device")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to prepare XLA inputs: {e}")
+        return load_cpu_fallback_model()
     
-    # Compile directly with torch_neuronx.trace (skip torch.jit.trace)
+    # Move model to XLA device
+    logger.info("Moving model to XLA device...")
+    try:
+        model = model.to(device)
+        logger.info("✅ Model moved to XLA device")
+    except Exception as e:
+        logger.error(f"❌ Failed to move model to XLA device: {e}")
+        return load_cpu_fallback_model()
+    
+    # Try XLA-compatible compilation
+    logger.info("Starting XLA-compatible Neuron compilation...")
     try:
         with torch.no_grad():
-            # Create a wrapper function that only takes the inputs we need
-            def model_wrapper(input_ids, attention_mask):
-                # Call model with only basic inputs, no past_key_values
+            # Create XLA-compatible wrapper function
+            def xla_model_wrapper(input_ids, attention_mask):
+                # Ensure inputs are on XLA device
+                if not input_ids.device.type == 'xla':
+                    input_ids = input_ids.to(device)
+                if not attention_mask.device.type == 'xla':
+                    attention_mask = attention_mask.to(device)
+                
+                # Call model with XLA tensors
                 outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
-                    use_cache=False,  # Disable KV caching to avoid tensor type issues
+                    use_cache=False,
                     return_dict=True
                 )
                 return outputs.logits
             
-            # Trace with simplified inputs
+            # Test the wrapper first
+            logger.info("Testing XLA model wrapper...")
+            test_output = xla_model_wrapper(input_ids, attention_mask)
+            logger.info(f"✅ XLA wrapper test successful, output shape: {test_output.shape}")
+            
+            # Compile with torch_neuronx
+            logger.info("Compiling with torch_neuronx...")
             neuron_model = torch_neuronx.trace(
-                model_wrapper,
-                (sample_input['input_ids'], sample_input['attention_mask']),
+                xla_model_wrapper,
+                (input_ids, attention_mask),
                 compiler_workdir=COMPILED_MODEL_PATH,
                 compiler_args=[
                     "--model-type=transformer-inference",
                     f"--num-cores={NEURON_CORES}",
                     "--auto-cast=none",
-                    "--optlevel=1",  # Lower optimization level for stability
-                    "--enable-saturate-infinity",
-                    "--enable-mixed-precision-accumulation"
+                    "--optlevel=1",
+                    "--enable-saturate-infinity"
                 ]
             )
-    
+            
+            logger.info("✅ Neuron compilation successful")
+            
     except Exception as e:
-        logger.error(f"Neuron compilation failed: {e}")
-        logger.info("Attempting fallback compilation with even simpler settings...")
+        logger.error(f"❌ XLA-compatible compilation failed: {e}")
+        logger.info("🔄 Trying simplified XLA approach...")
         
-        # Fallback: try with minimal settings
+        # Ultra-simple fallback
         try:
             with torch.no_grad():
-                def simple_model_wrapper(input_ids):
-                    # Even simpler - just input_ids, let model handle attention_mask
+                def simple_xla_wrapper(input_ids):
+                    if not input_ids.device.type == 'xla':
+                        input_ids = input_ids.to(device)
+                    
+                    # Just forward pass, no attention mask
                     outputs = model(input_ids=input_ids, use_cache=False, return_dict=True)
                     return outputs.logits
                 
+                # Test simple wrapper
+                test_output = simple_xla_wrapper(input_ids)
+                logger.info(f"✅ Simple XLA wrapper test successful")
+                
                 neuron_model = torch_neuronx.trace(
-                    simple_model_wrapper,
-                    (sample_input['input_ids'],),
+                    simple_xla_wrapper,
+                    (input_ids,),
                     compiler_workdir=COMPILED_MODEL_PATH,
                     compiler_args=[
                         "--model-type=transformer-inference",
@@ -141,19 +198,49 @@ def compile_model_for_neuron():
                         "--optlevel=1"
                     ]
                 )
+                
+                logger.info("✅ Simplified Neuron compilation successful")
+                
         except Exception as e2:
-            logger.error(f"Fallback compilation also failed: {e2}")
-            logger.info("Using CPU fallback model...")
-            return model, tokenizer  # Return uncompiled model as fallback
+            logger.error(f"❌ Simplified XLA compilation also failed: {e2}")
+            logger.info("🔄 Using CPU fallback...")
+            return load_cpu_fallback_model()
     
     # Save compiled model
     logger.info("Saving compiled model...")
-    os.makedirs(COMPILED_MODEL_PATH, exist_ok=True)
-    torch.jit.save(neuron_model, f"{COMPILED_MODEL_PATH}/neuron_model.pt")
-    tokenizer.save_pretrained(COMPILED_MODEL_PATH)
-    
-    logger.info("✅ Model compilation completed successfully")
-    return neuron_model, tokenizer
+    try:
+        os.makedirs(COMPILED_MODEL_PATH, exist_ok=True)
+        torch.jit.save(neuron_model, f"{COMPILED_MODEL_PATH}/neuron_model.pt")
+        tokenizer.save_pretrained(COMPILED_MODEL_PATH)
+        logger.info("✅ Model compilation and save completed successfully")
+        return neuron_model, tokenizer
+    except Exception as e:
+        logger.error(f"❌ Failed to save compiled model: {e}")
+        return load_cpu_fallback_model()
+
+def load_cpu_fallback_model():
+    """Load CPU fallback model when Neuron compilation fails"""
+    logger.info("🔄 Loading CPU fallback model...")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            torch_dtype=torch.float16,
+            device_map="cpu",
+            low_cpu_mem_usage=True,
+            trust_remote_code=True
+        )
+        
+        logger.info("✅ CPU fallback model loaded successfully")
+        logger.warning("⚠️ Running on CPU - performance will be limited")
+        return model, tokenizer
+        
+    except Exception as e:
+        logger.error(f"❌ CPU fallback also failed: {e}")
+        raise Exception("Both Neuron compilation and CPU fallback failed")
 
 def load_compiled_model():
     """Load pre-compiled Neuron model"""
@@ -194,7 +281,7 @@ async def lifespan(app: FastAPI):
         if model is None or tokenizer is None:
             raise Exception("Model or tokenizer is None after initialization")
         
-        logger.info(f"✅ Neuron model initialized successfully with {NEURON_CORES} cores")
+        logger.info(f"✅ Model initialized successfully")
         logger.info(f"📊 Model: {MODEL_NAME}")
         logger.info(f"🔧 Max length: {MAX_LENGTH}")
         logger.info("🎯 Server ready for requests!")
@@ -202,32 +289,15 @@ async def lifespan(app: FastAPI):
         yield
         
     except Exception as e:
-        logger.error(f"❌ Failed to initialize Neuron model: {e}")
-        logger.info("🔄 Attempting CPU fallback...")
+        logger.error(f"❌ Model initialization completely failed: {e}")
+        logger.info("🔄 Final attempt with CPU fallback...")
         
         try:
-            # CPU fallback
-            logger.info("Loading model on CPU as fallback...")
-            tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-            if tokenizer.pad_token is None:
-                tokenizer.pad_token = tokenizer.eos_token
-            
-            model = AutoModelForCausalLM.from_pretrained(
-                MODEL_NAME,
-                torch_dtype=torch.float16,
-                device_map="cpu",
-                low_cpu_mem_usage=True,
-                trust_remote_code=True
-            )
-            
-            logger.info("✅ CPU fallback model loaded successfully")
-            logger.warning("⚠️ Running on CPU - performance will be limited")
-            
+            model, tokenizer = load_cpu_fallback_model()
             yield
-            
-        except Exception as fallback_error:
-            logger.error(f"❌ CPU fallback also failed: {fallback_error}")
-            raise Exception("Both Neuron compilation and CPU fallback failed")
+        except Exception as final_error:
+            logger.error(f"❌ All initialization attempts failed: {final_error}")
+            raise Exception("Complete model initialization failure")
     
     finally:
         if model:
