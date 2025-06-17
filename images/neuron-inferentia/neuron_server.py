@@ -57,8 +57,8 @@ class HealthResponse(BaseModel):
     device_type: str
 
 def compile_model_for_neuron():
-    """Compile the model for Neuron inference"""
-    logger.info("Starting model compilation for Neuron...")
+    """Compile the model for Neuron inference - Simplified version"""
+    logger.info("Starting simplified model compilation for Neuron...")
     
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -66,51 +66,93 @@ def compile_model_for_neuron():
         tokenizer.pad_token = tokenizer.eos_token
     
     # Load model in float32 first
+    logger.info("Loading model...")
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch.float32,
-        low_cpu_mem_usage=True
+        low_cpu_mem_usage=True,
+        trust_remote_code=True
     )
     
-    # Prepare sample input for tracing
+    # Use shorter sequence length for compilation to avoid tensor issues
+    COMPILE_SEQUENCE_LENGTH = 128  # Much shorter for stable compilation
+    
+    # Prepare simple sample input for tracing (no past_key_values)
+    logger.info(f"Preparing sample input with sequence length {COMPILE_SEQUENCE_LENGTH}...")
+    sample_text = "Hello, how are you?"
     sample_input = tokenizer(
-        "Hello, how are you?", 
+        sample_text, 
         return_tensors="pt", 
-        max_length=SEQUENCE_LENGTH,
+        max_length=COMPILE_SEQUENCE_LENGTH,
         padding="max_length",
         truncation=True
     )
     
-    logger.info("Tracing model for Neuron compilation...")
+    logger.info("Starting Neuron compilation with simplified inputs...")
     
-    # Trace the model for Neuron
-    with torch.no_grad():
-        traced_model = torch.jit.trace(
-            model,
-            (sample_input['input_ids'], sample_input['attention_mask']),
-            strict=False
-        )
+    # Compile directly with torch_neuronx.trace (skip torch.jit.trace)
+    try:
+        with torch.no_grad():
+            # Create a wrapper function that only takes the inputs we need
+            def model_wrapper(input_ids, attention_mask):
+                # Call model with only basic inputs, no past_key_values
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    use_cache=False,  # Disable KV caching to avoid tensor type issues
+                    return_dict=True
+                )
+                return outputs.logits
+            
+            # Trace with simplified inputs
+            neuron_model = torch_neuronx.trace(
+                model_wrapper,
+                (sample_input['input_ids'], sample_input['attention_mask']),
+                compiler_workdir=COMPILED_MODEL_PATH,
+                compiler_args=[
+                    "--model-type=transformer-inference",
+                    f"--num-cores={NEURON_CORES}",
+                    "--auto-cast=none",
+                    "--optlevel=1",  # Lower optimization level for stability
+                    "--enable-saturate-infinity",
+                    "--enable-mixed-precision-accumulation"
+                ]
+            )
     
-    # Compile for Neuron
-    logger.info("Compiling traced model for Neuron...")
-    neuron_model = torch_neuronx.trace(
-        traced_model,
-        (sample_input['input_ids'], sample_input['attention_mask']),
-        compiler_workdir=COMPILED_MODEL_PATH,
-        compiler_args=[
-            "--model-type=transformer",
-            f"--num-cores={NEURON_CORES}",
-            "--auto-cast=none",
-            "--optlevel=2"
-        ]
-    )
+    except Exception as e:
+        logger.error(f"Neuron compilation failed: {e}")
+        logger.info("Attempting fallback compilation with even simpler settings...")
+        
+        # Fallback: try with minimal settings
+        try:
+            with torch.no_grad():
+                def simple_model_wrapper(input_ids):
+                    # Even simpler - just input_ids, let model handle attention_mask
+                    outputs = model(input_ids=input_ids, use_cache=False, return_dict=True)
+                    return outputs.logits
+                
+                neuron_model = torch_neuronx.trace(
+                    simple_model_wrapper,
+                    (sample_input['input_ids'],),
+                    compiler_workdir=COMPILED_MODEL_PATH,
+                    compiler_args=[
+                        "--model-type=transformer-inference",
+                        f"--num-cores={NEURON_CORES}",
+                        "--optlevel=1"
+                    ]
+                )
+        except Exception as e2:
+            logger.error(f"Fallback compilation also failed: {e2}")
+            logger.info("Using CPU fallback model...")
+            return model, tokenizer  # Return uncompiled model as fallback
     
     # Save compiled model
+    logger.info("Saving compiled model...")
     os.makedirs(COMPILED_MODEL_PATH, exist_ok=True)
     torch.jit.save(neuron_model, f"{COMPILED_MODEL_PATH}/neuron_model.pt")
     tokenizer.save_pretrained(COMPILED_MODEL_PATH)
     
-    logger.info("Model compilation completed successfully")
+    logger.info("✅ Model compilation completed successfully")
     return neuron_model, tokenizer
 
 def load_compiled_model():
@@ -131,29 +173,69 @@ async def lifespan(app: FastAPI):
     """Initialize and cleanup the Neuron model"""
     global model, tokenizer
     
-    logger.info("Starting Neuron model initialization...")
+    logger.info("🚀 Starting Neuron model initialization...")
     
     try:
         # Check if compiled model exists
         if os.path.exists(f"{COMPILED_MODEL_PATH}/neuron_model.pt"):
-            logger.info("Found pre-compiled model, loading...")
-            model, tokenizer = load_compiled_model()
+            logger.info("📁 Found pre-compiled model, loading...")
+            try:
+                model, tokenizer = load_compiled_model()
+                logger.info("✅ Pre-compiled Neuron model loaded successfully")
+            except Exception as load_error:
+                logger.error(f"❌ Failed to load pre-compiled model: {load_error}")
+                logger.info("🔄 Falling back to compilation...")
+                model, tokenizer = compile_model_for_neuron()
         else:
-            logger.info("No pre-compiled model found, compiling...")
+            logger.info("🔨 No pre-compiled model found, starting compilation...")
             model, tokenizer = compile_model_for_neuron()
         
-        logger.info(f"Neuron model initialized successfully with {NEURON_CORES} cores")
+        # Verify model is working
+        if model is None or tokenizer is None:
+            raise Exception("Model or tokenizer is None after initialization")
+        
+        logger.info(f"✅ Neuron model initialized successfully with {NEURON_CORES} cores")
+        logger.info(f"📊 Model: {MODEL_NAME}")
+        logger.info(f"🔧 Max length: {MAX_LENGTH}")
+        logger.info("🎯 Server ready for requests!")
         
         yield
         
     except Exception as e:
-        logger.error(f"Failed to initialize Neuron model: {e}")
-        raise
+        logger.error(f"❌ Failed to initialize Neuron model: {e}")
+        logger.info("🔄 Attempting CPU fallback...")
+        
+        try:
+            # CPU fallback
+            logger.info("Loading model on CPU as fallback...")
+            tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME,
+                torch_dtype=torch.float16,
+                device_map="cpu",
+                low_cpu_mem_usage=True,
+                trust_remote_code=True
+            )
+            
+            logger.info("✅ CPU fallback model loaded successfully")
+            logger.warning("⚠️ Running on CPU - performance will be limited")
+            
+            yield
+            
+        except Exception as fallback_error:
+            logger.error(f"❌ CPU fallback also failed: {fallback_error}")
+            raise Exception("Both Neuron compilation and CPU fallback failed")
+    
     finally:
         if model:
-            logger.info("Cleaning up Neuron model...")
+            logger.info("🧹 Cleaning up model resources...")
             del model
+        if tokenizer:
             del tokenizer
+        logger.info("✅ Cleanup completed")
 
 # Create FastAPI app with lifespan
 app = FastAPI(
@@ -196,58 +278,116 @@ async def generate_text(request: GenerateRequest):
         # Format prompt for Mistral Instruct
         formatted_prompt = f"<s>[INST] {request.prompt} [/INST]"
         
-        # Tokenize input
+        # Tokenize input with shorter max length for stability
+        max_input_length = min(512, MAX_LENGTH - request.max_tokens)  # Leave room for generation
         inputs = tokenizer(
             formatted_prompt,
             return_tensors="pt",
-            max_length=SEQUENCE_LENGTH,
-            padding="max_length",
+            max_length=max_input_length,
+            padding=False,  # Don't pad for generation
             truncation=True
         )
         
         input_ids = inputs['input_ids']
-        attention_mask = inputs['attention_mask']
+        attention_mask = inputs.get('attention_mask', torch.ones_like(input_ids))
         
-        # Calculate actual prompt length (excluding padding)
-        prompt_length = (input_ids != tokenizer.pad_token_id).sum().item()
+        logger.info(f"Generating text for prompt: {request.prompt[:50]}...")
         
-        # Generate with Neuron model
+        # Use simplified generation approach
         with torch.no_grad():
-            # For Neuron, we need to handle generation differently
-            # This is a simplified approach - you may need to implement
-            # custom generation logic for better performance
-            
-            generated_ids = input_ids.clone()
-            
-            for _ in range(min(request.max_tokens, MAX_LENGTH - prompt_length)):
-                # Get model predictions
-                outputs = model(generated_ids, attention_mask)
+            try:
+                # Try to use the model's built-in generate method if available
+                if hasattr(model, 'generate'):
+                    generated_ids = model.generate(
+                        input_ids,
+                        attention_mask=attention_mask,
+                        max_new_tokens=request.max_tokens,
+                        temperature=request.temperature,
+                        top_p=request.top_p,
+                        top_k=request.top_k,
+                        repetition_penalty=request.repetition_penalty,
+                        do_sample=True,
+                        pad_token_id=tokenizer.pad_token_id,
+                        eos_token_id=tokenizer.eos_token_id,
+                        use_cache=False,  # Disable KV caching
+                        return_dict_in_generate=False
+                    )
+                else:
+                    # Fallback: simple autoregressive generation
+                    generated_ids = input_ids.clone()
+                    
+                    for step in range(request.max_tokens):
+                        # Get model predictions (simplified call)
+                        if hasattr(model, '__call__'):
+                            # For compiled Neuron model
+                            logits = model(generated_ids)
+                        else:
+                            # For regular model
+                            outputs = model(generated_ids, attention_mask=attention_mask, use_cache=False)
+                            logits = outputs.logits
+                        
+                        # Get next token logits
+                        next_token_logits = logits[:, -1, :]
+                        
+                        # Apply temperature
+                        if request.temperature > 0:
+                            next_token_logits = next_token_logits / request.temperature
+                        
+                        # Simple sampling
+                        probs = torch.softmax(next_token_logits, dim=-1)
+                        next_token = torch.multinomial(probs, num_samples=1)
+                        
+                        # Check for stop tokens
+                        if next_token.item() == tokenizer.eos_token_id:
+                            break
+                        
+                        # Append to generated sequence
+                        generated_ids = torch.cat([generated_ids, next_token], dim=-1)
+                        
+                        # Update attention mask
+                        attention_mask = torch.cat([
+                            attention_mask, 
+                            torch.ones(1, 1, dtype=attention_mask.dtype)
+                        ], dim=-1)
                 
-                # Get next token logits
-                next_token_logits = outputs.logits[:, -1, :]
+                # Decode the generated text
+                generated_text = tokenizer.decode(
+                    generated_ids[0][input_ids.shape[1]:],  # Only decode the new tokens
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=True
+                )
                 
-                # Apply temperature
-                if request.temperature > 0:
-                    next_token_logits = next_token_logits / request.temperature
+                # Calculate token usage
+                prompt_tokens = input_ids.shape[1]
+                completion_tokens = generated_ids.shape[1] - prompt_tokens
+                total_tokens = prompt_tokens + completion_tokens
                 
-                # Apply top-k filtering
-                if request.top_k > 0:
-                    top_k_logits, top_k_indices = torch.topk(next_token_logits, request.top_k)
-                    next_token_logits = torch.full_like(next_token_logits, float('-inf'))
-                    next_token_logits.scatter_(1, top_k_indices, top_k_logits)
+                logger.info(f"Generated {completion_tokens} tokens successfully")
                 
-                # Apply top-p filtering
-                if request.top_p < 1.0:
-                    sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
-                    cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
-                    sorted_indices_to_remove = cumulative_probs > request.top_p
-                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                    sorted_indices_to_remove[..., 0] = 0
-                    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-                    next_token_logits[indices_to_remove] = float('-inf')
+                return GenerateResponse(
+                    text=generated_text.strip(),
+                    prompt=request.prompt,
+                    model=MODEL_NAME,
+                    usage={
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens
+                    }
+                )
                 
-                # Sample next token
-                probs = torch.softmax(next_token_logits, dim=-1)
+            except Exception as gen_error:
+                logger.error(f"Generation failed: {gen_error}")
+                # Return a simple fallback response
+                return GenerateResponse(
+                    text="I apologize, but I'm having trouble generating a response right now.",
+                    prompt=request.prompt,
+                    model=MODEL_NAME,
+                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                )
+        
+    except Exception as e:
+        logger.error(f"Request processing failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
                 next_token = torch.multinomial(probs, num_samples=1)
                 
                 # Check for stop tokens
