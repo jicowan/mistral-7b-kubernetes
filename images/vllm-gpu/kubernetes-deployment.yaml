@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: vllm-server
-        image: vllm-mistral-7b:latest
+        image: 820537372947.dkr.ecr.us-west-2.amazonaws.com/vllm-mistral-7b:latest
         ports:
         - containerPort: 8000
           name: http

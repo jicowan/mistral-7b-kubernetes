@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: triton-server
-        image: triton-vllm-mistral-7b:latest
+        image: 820537372947.dkr.ecr.us-west-2.amazonaws.com/triton-vllm-mistral-7b:latest
         ports:
         - containerPort: 8000
           name: http
@@ -38,22 +38,22 @@ spec:
             nvidia.com/gpu: 1
             memory: "24Gi"
             cpu: "8"
-        readinessProbe:
-          httpGet:
-            path: /v2/health/ready
-            port: 8000
-          initialDelaySeconds: 120
-          periodSeconds: 10
-          timeoutSeconds: 30
-          failureThreshold: 3
-        livenessProbe:
-          httpGet:
-            path: /v2/health/live
-            port: 8000
-          initialDelaySeconds: 180
-          periodSeconds: 30
-          timeoutSeconds: 30
-          failureThreshold: 3
+        # readinessProbe:
+        #   httpGet:
+        #     path: /v2/health/ready
+        #     port: 8000
+        #   initialDelaySeconds: 120
+        #   periodSeconds: 10
+        #   timeoutSeconds: 30
+        #   failureThreshold: 3
+        # livenessProbe:
+        #   httpGet:
+        #     path: /v2/health/live
+        #     port: 8000
+        #   initialDelaySeconds: 180
+        #   periodSeconds: 30
+        #   timeoutSeconds: 30
+        #   failureThreshold: 3
         volumeMounts:
         - name: shm
           mountPath: /dev/shm

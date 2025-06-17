@@ -54,14 +54,64 @@ class TritonPythonModel:
                 temperature_tensor = pb_utils.get_input_tensor_by_name(request, "temperature")
                 top_p_tensor = pb_utils.get_input_tensor_by_name(request, "top_p")
                 
-                # Extract values with error handling
-                prompt = prompt_tensor.as_numpy()[0].decode('utf-8') if prompt_tensor else ""
-                max_tokens = int(max_tokens_tensor.as_numpy()[0]) if max_tokens_tensor else 512
-                temperature = float(temperature_tensor.as_numpy()[0]) if temperature_tensor else 0.7
-                top_p = float(top_p_tensor.as_numpy()[0]) if top_p_tensor else 0.9
+                # Extract values with robust error handling
+                prompt = ""
+                if prompt_tensor:
+                    prompt_raw = prompt_tensor.as_numpy()[0]
+                    if isinstance(prompt_raw, bytes):
+                        prompt = prompt_raw.decode('utf-8')
+                    elif isinstance(prompt_raw, str):
+                        prompt = prompt_raw
+                    elif hasattr(prompt_raw, 'item'):
+                        # Handle numpy scalar
+                        prompt_item = prompt_raw.item()
+                        if isinstance(prompt_item, bytes):
+                            prompt = prompt_item.decode('utf-8')
+                        elif isinstance(prompt_item, str):
+                            prompt = prompt_item
+                        else:
+                            prompt = str(prompt_item)
+                    else:
+                        prompt = str(prompt_raw)
+                
+                # Extract other parameters safely
+                max_tokens = 512
+                if max_tokens_tensor:
+                    try:
+                        max_tokens_raw = max_tokens_tensor.as_numpy()[0]
+                        if hasattr(max_tokens_raw, 'item'):
+                            max_tokens = int(max_tokens_raw.item())
+                        else:
+                            max_tokens = int(max_tokens_raw)
+                    except (ValueError, TypeError):
+                        max_tokens = 512
+                
+                temperature = 0.7
+                if temperature_tensor:
+                    try:
+                        temp_raw = temperature_tensor.as_numpy()[0]
+                        if hasattr(temp_raw, 'item'):
+                            temperature = float(temp_raw.item())
+                        else:
+                            temperature = float(temp_raw)
+                    except (ValueError, TypeError):
+                        temperature = 0.7
+                
+                top_p = 0.9
+                if top_p_tensor:
+                    try:
+                        top_p_raw = top_p_tensor.as_numpy()[0]
+                        if hasattr(top_p_raw, 'item'):
+                            top_p = float(top_p_raw.item())
+                        else:
+                            top_p = float(top_p_raw)
+                    except (ValueError, TypeError):
+                        top_p = 0.9
                 
                 if not prompt:
                     raise ValueError("Empty prompt provided")
+                
+                print(f"Processing prompt: {prompt[:50]}...")  # Debug log
                 
                 # Format prompt for Mistral Instruct
                 formatted_prompt = f"<s>[INST] {prompt} [/INST]"
@@ -81,6 +131,8 @@ class TritonPythonModel:
                 outputs = self.llm.generate([formatted_prompt], sampling_params)
                 generated_text = outputs[0].outputs[0].text
                 
+                print(f"Generated response: {generated_text[:50]}...")  # Debug log
+                
                 # Create output tensor
                 output_tensor = pb_utils.Tensor(
                     "generated_text",
@@ -92,6 +144,8 @@ class TritonPythonModel:
             except Exception as e:
                 error_msg = f"Generation failed: {str(e)}"
                 print(f"Error in Triton model execution: {error_msg}")
+                import traceback
+                traceback.print_exc()  # Print full stack trace for debugging
                 response = pb_utils.InferenceResponse(
                     error=pb_utils.TritonError(error_msg)
                 )

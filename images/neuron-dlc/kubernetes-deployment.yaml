@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
       - name: neuron-server
-        image: neuron-mistral-7b-dlc:latest
+        image: 820537372947.dkr.ecr.us-west-2.amazonaws.com/neuron-mistral-7b-dlc:latest
         ports:
         - containerPort: 8000
           name: http
