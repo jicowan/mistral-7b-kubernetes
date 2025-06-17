@@ -61,8 +61,8 @@ COPY requirements-triton.txt .
 RUN pip install -r requirements-triton.txt
 
 # Create a simple Triton server wrapper since we're using Python backend
-# This approach uses the Python backend with vLLM integration
-COPY triton_python_backend.py /models/vllm_mistral/1/model.py
+# The model.py file is already in the triton-model-repository structure
+# No need to copy separately as it's included with the model repository
 
 # Set optimal environment variables for AWS DLC + Triton
 ENV NCCL_DEBUG=INFO

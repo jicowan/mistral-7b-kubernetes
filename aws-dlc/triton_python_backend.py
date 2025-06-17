@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+"""
+Triton Python Backend Model for vLLM Mistral 7B
+This file is a reference copy of the model.py used in the Triton model repository.
+The actual file used by Triton is at: triton-model-repository/vllm_mistral/1/model.py
+"""
+
 import json
 import numpy as np
 import triton_python_backend_utils as pb_utils
@@ -32,8 +39,6 @@ class TritonPythonModel:
             max_num_seqs=256,
         )
         
-        print(f"Triton vLLM model initialized: {model_name}")
-        
         # Get output configuration
         output_config = pb_utils.get_output_config_by_name(
             model_config, "generated_text"
@@ -41,6 +46,8 @@ class TritonPythonModel:
         self.output_dtype = pb_utils.triton_string_to_numpy(
             output_config['data_type']
         )
+        
+        print(f"Triton vLLM model initialized: {model_name}")
         
     def execute(self, requests):
         """Execute inference requests"""
