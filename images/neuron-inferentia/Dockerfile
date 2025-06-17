@@ -36,10 +36,10 @@ RUN mkdir -p /tmp/neuron_compiled_model
 
 # Copy application files
 COPY neuron_server.py .
-COPY requirements-neuron.txt .
+COPY requirements.txt .
 
 # Install additional requirements
-RUN pip install -r requirements-neuron.txt
+RUN pip install -r requirements.txt
 
 # Expose port
 EXPOSE 8000

@@ -49,7 +49,7 @@ RUN mkdir -p /tmp/neuron_compiled_model
 # Copy application files
 COPY neuron_server.py .
 COPY neuron_compile.py .
-COPY requirements-neuron.txt .
+COPY requirements.txt .
 
 # Expose port
 EXPOSE 8000
