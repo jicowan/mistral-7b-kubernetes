@@ -1,0 +1,174 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triton-mistral-7b-dlc
+  labels:
+    app: triton-mistral-7b-dlc
+    version: aws-dlc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: triton-mistral-7b-dlc
+  template:
+    metadata:
+      labels:
+        app: triton-mistral-7b-dlc
+        version: aws-dlc
+    spec:
+      containers:
+      - name: triton-server
+        image: triton-mistral-7b-dlc:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        - containerPort: 8001
+          name: grpc
+        - containerPort: 8002
+          name: metrics
+        env:
+        - name: MODEL_NAME
+          value: "mistralai/Mistral-7B-Instruct-v0.3"
+        - name: MAX_MODEL_LEN
+          value: "32768"
+        - name: GPU_MEMORY_UTILIZATION
+          value: "0.9"
+        - name: TENSOR_PARALLEL_SIZE
+          value: "1"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "8000"
+        - name: WORKERS
+          value: "1"
+        # AWS DLC specific optimizations
+        - name: NCCL_DEBUG
+          value: "INFO"
+        - name: NCCL_SOCKET_IFNAME
+          value: "^docker0,lo"
+        - name: CUDA_LAUNCH_BLOCKING
+          value: "0"
+        - name: OMP_NUM_THREADS
+          value: "1"
+        - name: AWS_DEFAULT_REGION
+          value: "us-west-2"
+        # Triton specific
+        - name: TRITON_MODEL_REPOSITORY
+          value: "/models"
+        - name: TRITON_LOG_VERBOSE
+          value: "1"
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: "16Gi"
+            cpu: "4"
+          limits:
+            nvidia.com/gpu: 1
+            memory: "24Gi"
+            cpu: "8"
+        readinessProbe:
+          httpGet:
+            path: /v2/health/ready
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          timeoutSeconds: 30
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /v2/health/live
+            port: 8000
+          initialDelaySeconds: 180
+          periodSeconds: 30
+          timeoutSeconds: 30
+          failureThreshold: 3
+        volumeMounts:
+        - name: shm
+          mountPath: /dev/shm
+        # Mount for AWS credentials if needed
+        - name: aws-credentials
+          mountPath: /root/.aws
+          readOnly: true
+      volumes:
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 2Gi
+      # AWS credentials volume (optional)
+      - name: aws-credentials
+        secret:
+          secretName: aws-credentials
+          optional: true
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        # node.kubernetes.io/instance-type: g5.xlarge  # AWS GPU instances
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: triton-mistral-7b-dlc-service
+  labels:
+    app: triton-mistral-7b-dlc
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  - port: 8001
+    targetPort: 8001
+    protocol: TCP
+    name: grpc
+  - port: 8002
+    targetPort: 8002
+    protocol: TCP
+    name: metrics
+  selector:
+    app: triton-mistral-7b-dlc
+---
+# HorizontalPodAutoscaler for Triton
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: triton-mistral-7b-dlc-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: triton-mistral-7b-dlc
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+# ServiceMonitor for Prometheus monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: triton-mistral-7b-dlc-metrics
+  labels:
+    app: triton-mistral-7b-dlc
+spec:
+  selector:
+    matchLabels:
+      app: triton-mistral-7b-dlc
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s

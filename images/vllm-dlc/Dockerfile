@@ -1,0 +1,64 @@
+# AWS Deep Learning Container for vLLM + Mistral 7B
+# Using AWS PyTorch Inference DLC with CUDA support
+# FROM 763104351884.dkr.ecr.us-west-2.amazonaws.com/pytorch-inference:2.1.0-gpu-py310-cu121-ubuntu20.04-ec2
+FROM 763104351884.dkr.ecr.us-west-2.amazonaws.com/pytorch-inference:2.6.0-gpu-py312-cu124-ubuntu22.04-ec2
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+
+# AWS DLC already includes:
+# - PyTorch 2.6.0 with CUDA 12.4
+# - Python 3.12
+# - CUDA toolkit
+# - cuDNN
+# - NCCL
+# - Basic system dependencies
+
+# Install additional system dependencies not in DLC
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip (DLC may have older version)
+RUN pip install --upgrade pip
+
+# Install vLLM (compatible with PyTorch 2.6.0 and CUDA 12.4)
+RUN pip install vllm>=0.6.0
+
+# Install additional dependencies for our server (updated for Python 3.12)
+RUN pip install \
+    fastapi>=0.110.0 \
+    uvicorn[standard]>=0.27.0 \
+    pydantic>=2.6.0 \
+    transformers>=4.40.0 \
+    accelerate>=0.28.0 \
+    sentencepiece>=0.2.0
+
+# Create app directory
+WORKDIR /app
+
+# Copy application files
+COPY vllm_server.py .
+COPY requirements.txt .
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Set optimal environment variables for AWS DLC + PyTorch 2.6
+ENV NCCL_DEBUG=INFO
+ENV NCCL_SOCKET_IFNAME=^docker0,lo
+ENV CUDA_LAUNCH_BLOCKING=0
+# New PyTorch 2.6 optimizations
+ENV TORCH_CUDNN_V8_API_ENABLED=1
+ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+
+# Run the application
+CMD ["python", "vllm_server.py"]

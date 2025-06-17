@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-mistral-7b-dlc
+  labels:
+    app: vllm-mistral-7b-dlc
+    version: aws-dlc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-mistral-7b-dlc
+  template:
+    metadata:
+      labels:
+        app: vllm-mistral-7b-dlc
+        version: aws-dlc
+    spec:
+      containers:
+      - name: vllm-server
+        image: vllm-mistral-7b-dlc:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: MODEL_NAME
+          value: "mistralai/Mistral-7B-Instruct-v0.3"
+        - name: MAX_MODEL_LEN
+          value: "32768"
+        - name: GPU_MEMORY_UTILIZATION
+          value: "0.9"
+        - name: TENSOR_PARALLEL_SIZE
+          value: "1"
+        - name: TRUST_REMOTE_CODE
+          value: "true"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "8000"
+        # AWS DLC specific optimizations
+        - name: NCCL_DEBUG
+          value: "INFO"
+        - name: NCCL_SOCKET_IFNAME
+          value: "^docker0,lo"
+        - name: CUDA_LAUNCH_BLOCKING
+          value: "0"
+        - name: AWS_DEFAULT_REGION
+          value: "us-west-2"  # Adjust to your region
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: "16Gi"
+            cpu: "4"
+          limits:
+            nvidia.com/gpu: 1
+            memory: "24Gi"
+            cpu: "8"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 30
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 30
+          failureThreshold: 3
+        volumeMounts:
+        - name: shm
+          mountPath: /dev/shm
+        # Mount for AWS credentials if needed
+        - name: aws-credentials
+          mountPath: /root/.aws
+          readOnly: true
+      volumes:
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 2Gi
+      # AWS credentials volume (optional)
+      - name: aws-credentials
+        secret:
+          secretName: aws-credentials
+          optional: true
+      nodeSelector:
+        # Prefer AWS-optimized instances
+        kubernetes.io/arch: amd64
+        # node.kubernetes.io/instance-type: g5.xlarge  # AWS GPU instances
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-mistral-7b-dlc-service
+  labels:
+    app: vllm-mistral-7b-dlc
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: vllm-mistral-7b-dlc
+---
+# Optional: AWS Load Balancer Controller integration
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-mistral-7b-dlc-ingress
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vllm-mistral-7b-dlc-service
+            port:
+              number: 8000

@@ -26,44 +26,30 @@ phases:
   build:
     commands:
       - echo Build phase started on `date`
-      - echo Using new organized structure...
       
-      # Build vLLM GPU image
-      - echo "Building vLLM GPU image..."
-      - cd images/vllm-gpu
-      - docker build -t vllm-mistral-7b:latest -t $ECR_REGISTRY/vllm-mistral-7b:latest .
-      - cd ../..
+      # Build standard vLLM image with CUDA 12.9
+      - echo "Building vLLM standard image with CUDA 12.9..."
+      - docker build -f Dockerfile -t vllm-mistral-7b:latest -t $ECR_REGISTRY/vllm-mistral-7b:latest .
       
-      # Build Triton GPU image
-      - echo "Building Triton GPU image..."
-      - cd images/triton-gpu
-      - docker build -t triton-vllm-mistral-7b:latest -t $ECR_REGISTRY/triton-vllm-mistral-7b:latest .
-      - cd ../..
+      # Build Neuron image
+      - echo "Building Neuron image..."
+      - docker build -f Dockerfile.neuron -t neuron-mistral-7b:latest -t $ECR_REGISTRY/neuron-mistral-7b:latest .
       
-      # Build Neuron Inferentia image
-      - echo "Building Neuron Inferentia image..."
-      - cd images/neuron-inferentia
-      - docker build -t neuron-mistral-7b:latest -t $ECR_REGISTRY/neuron-mistral-7b:latest .
-      - cd ../..
+      # Build Triton image (basic version)
+      - echo "Building Triton image..."
+      - docker build -f Dockerfile.triton -t triton-vllm-mistral-7b:latest -t $ECR_REGISTRY/triton-vllm-mistral-7b:latest .
       
       # Build AWS DLC vLLM image
       - echo "Building AWS DLC vLLM image..."
-      - cd images/vllm-dlc
-      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin 763104351884.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-      - docker build -t vllm-mistral-7b-dlc:latest -t $ECR_REGISTRY/vllm-mistral-7b-dlc:latest .
-      - cd ../..
+      - docker build -f aws-dlc/Dockerfile.vllm-dlc -t vllm-mistral-7b-dlc:latest -t $ECR_REGISTRY/vllm-mistral-7b-dlc:latest .
       
       # Build AWS DLC Neuron image
       - echo "Building AWS DLC Neuron image..."
-      - cd images/neuron-dlc
-      - docker build -t neuron-mistral-7b-dlc:latest -t $ECR_REGISTRY/neuron-mistral-7b-dlc:latest .
-      - cd ../..
+      - docker build -f aws-dlc/Dockerfile.neuron-dlc -t neuron-mistral-7b-dlc:latest -t $ECR_REGISTRY/neuron-mistral-7b-dlc:latest .
       
       # Build AWS DLC Triton image
       - echo "Building AWS DLC Triton image..."
-      - cd images/triton-dlc
-      - docker build -t triton-mistral-7b-dlc:latest -t $ECR_REGISTRY/triton-mistral-7b-dlc:latest .
-      - cd ../..
+      - docker build -f aws-dlc/Dockerfile.triton-complete -t triton-mistral-7b-dlc:latest -t $ECR_REGISTRY/triton-mistral-7b-dlc:latest .
 
   post_build:
     commands:
@@ -72,20 +58,20 @@ phases:
       
       # Push all images
       - docker push $ECR_REGISTRY/vllm-mistral-7b:latest
-      - docker push $ECR_REGISTRY/triton-vllm-mistral-7b:latest
       - docker push $ECR_REGISTRY/neuron-mistral-7b:latest
+      - docker push $ECR_REGISTRY/triton-vllm-mistral-7b:latest
       - docker push $ECR_REGISTRY/vllm-mistral-7b-dlc:latest
       - docker push $ECR_REGISTRY/neuron-mistral-7b-dlc:latest
       - docker push $ECR_REGISTRY/triton-mistral-7b-dlc:latest
       
       - echo "All images pushed successfully!"
       - echo "Image URIs:"
-      - echo "  vLLM GPU: $ECR_REGISTRY/vllm-mistral-7b:latest"
-      - echo "  Triton GPU: $ECR_REGISTRY/triton-vllm-mistral-7b:latest"
-      - echo "  Neuron Inferentia: $ECR_REGISTRY/neuron-mistral-7b:latest"
-      - echo "  vLLM AWS DLC: $ECR_REGISTRY/vllm-mistral-7b-dlc:latest"
-      - echo "  Neuron AWS DLC: $ECR_REGISTRY/neuron-mistral-7b-dlc:latest"
-      - echo "  Triton AWS DLC: $ECR_REGISTRY/triton-mistral-7b-dlc:latest"
+      - echo "  Standard vLLM: $ECR_REGISTRY/vllm-mistral-7b:latest"
+      - echo "  Standard Neuron: $ECR_REGISTRY/neuron-mistral-7b:latest"
+      - echo "  Standard Triton: $ECR_REGISTRY/triton-vllm-mistral-7b:latest"
+      - echo "  AWS DLC vLLM: $ECR_REGISTRY/vllm-mistral-7b-dlc:latest"
+      - echo "  AWS DLC Neuron: $ECR_REGISTRY/neuron-mistral-7b-dlc:latest"
+      - echo "  AWS DLC Triton: $ECR_REGISTRY/triton-mistral-7b-dlc:latest"
 
 artifacts:
   files:

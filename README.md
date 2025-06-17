@@ -4,6 +4,7 @@ High-performance inference server for Mistral 7B Instruct with multiple deployme
 - **vLLM + NVIDIA GPUs** (A10G, L4) - Highest performance
 - **Triton + vLLM + NVIDIA GPUs** - Production features with dynamic batching
 - **AWS Neuron + Inferentia** (Inf1, Inf2) - Cost-effective AWS-native inference
+- **AWS Deep Learning Containers** - Optimized for AWS infrastructure
 
 ## Features
 
@@ -12,51 +13,43 @@ High-performance inference server for Mistral 7B Instruct with multiple deployme
 - **Production Ready**: Includes health checks, monitoring, and auto-scaling
 - **Kubernetes Native**: Complete deployment manifests included
 - **RESTful API**: FastAPI-based server with OpenAPI documentation
+- **Multiple Deployment Options**: Choose the best option for your use case
 
 ## Quick Start
 
-Choose your deployment option:
-
-### Option 1: vLLM + NVIDIA GPUs (Recommended for Performance)
+### Build All Images
 ```bash
-./build-and-deploy.sh
-kubectl port-forward service/vllm-mistral-7b-service 8000:8000
-python test_client.py
+./build-all-images.sh all
 ```
 
-### Option 2: Triton + vLLM + NVIDIA GPUs (Production Features)
+### Build Specific Image
 ```bash
-docker build -f Dockerfile.triton -t triton-vllm-mistral-7b:latest .
-kubectl apply -f kubernetes-deployment-triton.yaml
-kubectl port-forward service/triton-vllm-mistral-7b-service 8000:8000
-python triton_client.py
+# Build vLLM GPU image
+./build-all-images.sh vllm-gpu
+
+# Build Triton DLC image  
+./build-all-images.sh triton-dlc
+
+# Build Neuron Inferentia image
+./build-all-images.sh neuron-inferentia
 ```
 
-### Option 3: AWS Neuron + Inferentia (Cost-Effective)
+### Individual Image Build
 ```bash
-./build-and-deploy-neuron.sh
-kubectl port-forward service/neuron-mistral-7b-service 8000:8000
-python neuron_test_client.py
+cd images/vllm-gpu
+./build.sh
 ```
 
-## GPU Requirements
+## Available Images
 
-| GPU Model | VRAM | Status | Notes |
-|-----------|------|--------|-------|
-| A10G | 24GB | ✅ Recommended | Excellent performance |
-| L4 | 24GB | ✅ Recommended | Good price/performance |
-| V100 | 16GB | ⚠️ Limited | May need reduced context |
-| T4 | 16GB | ⚠️ Limited | May need reduced context |
-
-## Inferentia Requirements
-
-| Instance Type | Neuron Cores | Memory | Status | Notes |
-|---------------|--------------|--------|--------|-------|
-| inf1.xlarge | 4 | 8GB | ✅ Supported | Entry-level |
-| inf1.2xlarge | 4 | 16GB | ✅ Recommended | Good balance |
-| inf1.6xlarge | 16 | 48GB | ✅ High throughput | Multi-model |
-| inf2.xlarge | 2 | 32GB | ✅ Latest gen | Best efficiency |
-| inf2.8xlarge | 2 | 128GB | ✅ High memory | Large contexts |
+| Image | Directory | Description | Hardware | Performance |
+|-------|-----------|-------------|----------|-------------|
+| **vllm-gpu** | `images/vllm-gpu/` | vLLM + NVIDIA GPUs | A10G, L4, V100 | Highest |
+| **triton-gpu** | `images/triton-gpu/` | Triton + vLLM + GPUs | A10G, L4, V100 | High |
+| **neuron-inferentia** | `images/neuron-inferentia/` | AWS Neuron + Inferentia | Inf1, Inf2 | Medium |
+| **vllm-dlc** | `images/vllm-dlc/` | vLLM + AWS DLC | A10G, L4, V100 | Highest |
+| **triton-dlc** | `images/triton-dlc/` | Triton + AWS DLC | A10G, L4, V100 | High |
+| **neuron-dlc** | `images/neuron-dlc/` | Neuron + AWS DLC | Inf1, Inf2 | Medium |
 
 ## Configuration
 

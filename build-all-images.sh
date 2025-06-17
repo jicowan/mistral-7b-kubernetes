@@ -1,108 +1,190 @@
 #!/bin/bash
 
-# Build and push all container images to ECR
-# Usage: ./build-all-images.sh [AWS_REGION] [AWS_ACCOUNT_ID]
+# Build and push container images to ECR - Reorganized Version
+# Usage: ./build-all-images.sh [IMAGE_NAME] [AWS_REGION] [AWS_ACCOUNT_ID]
+# 
+# IMAGE_NAME options:
+#   all (default)     - Build all images
+#   vllm-gpu         - vLLM with NVIDIA GPUs
+#   triton-gpu       - Triton with NVIDIA GPUs  
+#   neuron-inferentia - Neuron with AWS Inferentia
+#   vllm-dlc         - vLLM with AWS DLC
+#   triton-dlc       - Triton with AWS DLC
+#   neuron-dlc       - Neuron with AWS DLC
 
 set -e
 
 # Configuration
-AWS_REGION=${1:-"us-west-2"}
-AWS_ACCOUNT_ID=${2:-$(aws sts get-caller-identity --query Account --output text)}
+IMAGE_TO_BUILD=${1:-"all"}
+AWS_REGION=${2:-"us-west-2"}
+AWS_ACCOUNT_ID=${3:-$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")}
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 # Image configurations
 declare -A IMAGES=(
-    ["vllm-mistral-7b"]="Dockerfile"
-    ["triton-vllm-mistral-7b"]="Dockerfile.triton"
-    ["neuron-mistral-7b"]="Dockerfile.neuron"
-    ["vllm-mistral-7b-dlc"]="aws-dlc/Dockerfile.vllm-dlc"
-    ["neuron-mistral-7b-dlc"]="aws-dlc/Dockerfile.neuron-dlc"
-    ["triton-mistral-7b-dlc"]="aws-dlc/Dockerfile.triton-complete"
+    ["vllm-gpu"]="vllm-mistral-7b"
+    ["triton-gpu"]="triton-vllm-mistral-7b"
+    ["neuron-inferentia"]="neuron-mistral-7b"
+    ["vllm-dlc"]="vllm-mistral-7b-dlc"
+    ["triton-dlc"]="triton-mistral-7b-dlc"
+    ["neuron-dlc"]="neuron-mistral-7b-dlc"
 )
 
-echo "🚀 Building and Pushing All Mistral 7B Images to ECR"
-echo "=================================================="
+echo "🚀 Building Mistral 7B Container Images"
+echo "======================================="
+echo "Target: $IMAGE_TO_BUILD"
 echo "AWS Region: $AWS_REGION"
-echo "AWS Account: $AWS_ACCOUNT_ID"
-echo "ECR Registry: $ECR_REGISTRY"
+echo "AWS Account: ${AWS_ACCOUNT_ID:-"(not detected)"}"
+echo "ECR Registry: ${ECR_REGISTRY:-"(local build only)"}"
 echo ""
 
-# Authenticate with ECR
-echo "1. Authenticating with ECR..."
-aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+# Function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
 
-# Create ECR repositories if they don't exist
-echo ""
-echo "2. Creating ECR repositories..."
-for image_name in "${!IMAGES[@]}"; do
-    echo "   Creating repository: $image_name"
-    aws ecr create-repository --repository-name $image_name --region $AWS_REGION 2>/dev/null || echo "   Repository $image_name already exists"
-done
+# Check prerequisites
+echo "1. Checking prerequisites..."
+if ! command_exists docker; then
+    echo "❌ Docker is not installed"
+    exit 1
+fi
 
-# Build and push images
-echo ""
-echo "3. Building and pushing images..."
-for image_name in "${!IMAGES[@]}"; do
-    dockerfile="${IMAGES[$image_name]}"
-    full_image_name="${ECR_REGISTRY}/${image_name}:latest"
-    
+if [ "$AWS_ACCOUNT_ID" != "" ] && ! command_exists aws; then
+    echo "❌ AWS CLI is not installed but AWS Account ID provided"
+    exit 1
+fi
+
+echo "✅ Prerequisites check passed"
+
+# Authenticate with ECR if AWS credentials available
+if [ "$AWS_ACCOUNT_ID" != "" ]; then
     echo ""
-    echo "   Building $image_name..."
-    echo "   Dockerfile: $dockerfile"
-    echo "   Target: $full_image_name"
-    
-    # Determine build context based on dockerfile location
-    if [[ $dockerfile == aws-dlc/* ]]; then
-        build_context="."
-        dockerfile_path="$dockerfile"
-    else
-        build_context="."
-        dockerfile_path="$dockerfile"
-    fi
-    
-    # Build image
-    docker build -f $dockerfile_path -t $image_name:latest -t $full_image_name $build_context
+    echo "2. Authenticating with ECR..."
+    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
     
     if [ $? -eq 0 ]; then
-        echo "   ✅ Build successful for $image_name"
-        
-        # Push to ECR
-        echo "   Pushing to ECR..."
-        docker push $full_image_name
-        
-        if [ $? -eq 0 ]; then
-            echo "   ✅ Push successful for $image_name"
-        else
-            echo "   ❌ Push failed for $image_name"
-        fi
+        echo "✅ ECR authentication successful"
     else
-        echo "   ❌ Build failed for $image_name"
+        echo "❌ ECR authentication failed"
+        exit 1
     fi
-done
-
-echo ""
-echo "4. Image Summary:"
-echo "=================="
-for image_name in "${!IMAGES[@]}"; do
-    full_image_name="${ECR_REGISTRY}/${image_name}:latest"
-    echo "   $full_image_name"
-done
-
-echo ""
-echo "5. Update Kubernetes deployments:"
-echo "================================="
-echo "Update your deployment YAML files with these image URIs:"
-echo ""
-for image_name in "${!IMAGES[@]}"; do
-    full_image_name="${ECR_REGISTRY}/${image_name}:latest"
-    echo "# For $image_name deployment:"
-    echo "image: $full_image_name"
+    
+    # Create ECR repositories
     echo ""
-done
+    echo "3. Creating ECR repositories..."
+    if [ "$IMAGE_TO_BUILD" = "all" ]; then
+        for image_key in "${!IMAGES[@]}"; do
+            image_name="${IMAGES[$image_key]}"
+            echo "   Creating repository: $image_name"
+            aws ecr create-repository --repository-name $image_name --region $AWS_REGION 2>/dev/null || echo "   Repository $image_name already exists"
+        done
+    else
+        image_name="${IMAGES[$IMAGE_TO_BUILD]}"
+        if [ "$image_name" != "" ]; then
+            echo "   Creating repository: $image_name"
+            aws ecr create-repository --repository-name $image_name --region $AWS_REGION 2>/dev/null || echo "   Repository $image_name already exists"
+        fi
+    fi
+else
+    echo ""
+    echo "2. Skipping ECR authentication (building locally only)"
+fi
 
-echo "🎉 All images built and pushed successfully!"
+# Build function
+build_image() {
+    local image_key=$1
+    local image_name="${IMAGES[$image_key]}"
+    local image_dir="images/$image_key"
+    
+    if [ ! -d "$image_dir" ]; then
+        echo "❌ Directory $image_dir not found"
+        return 1
+    fi
+    
+    echo ""
+    echo "Building $image_key ($image_name)..."
+    echo "Directory: $image_dir"
+    echo "================================"
+    
+    cd "$image_dir"
+    
+    # Determine registry parameter
+    local registry_param=""
+    if [ "$AWS_ACCOUNT_ID" != "" ]; then
+        registry_param="$ECR_REGISTRY"
+    fi
+    
+    # Run the individual build script
+    ./build.sh latest "$registry_param"
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ $image_key build completed successfully"
+    else
+        echo "❌ $image_key build failed"
+        cd - > /dev/null
+        return 1
+    fi
+    
+    cd - > /dev/null
+}
+
+# Build images
 echo ""
-echo "Next steps:"
-echo "1. Update your Kubernetes deployment YAML files with the ECR image URIs above"
-echo "2. Deploy to your Kubernetes cluster"
-echo "3. Test with: kubectl port-forward service/<service-name> 8000:8000"
+echo "4. Building images..."
+
+if [ "$IMAGE_TO_BUILD" = "all" ]; then
+    echo "Building all images..."
+    for image_key in "${!IMAGES[@]}"; do
+        build_image "$image_key"
+    done
+else
+    if [ "${IMAGES[$IMAGE_TO_BUILD]}" = "" ]; then
+        echo "❌ Unknown image: $IMAGE_TO_BUILD"
+        echo "Available options: ${!IMAGES[@]} all"
+        exit 1
+    fi
+    
+    echo "Building single image: $IMAGE_TO_BUILD"
+    build_image "$IMAGE_TO_BUILD"
+fi
+
+echo ""
+echo "5. Build Summary:"
+echo "================="
+if [ "$IMAGE_TO_BUILD" = "all" ]; then
+    for image_key in "${!IMAGES[@]}"; do
+        image_name="${IMAGES[$image_key]}"
+        if [ "$AWS_ACCOUNT_ID" != "" ]; then
+            echo "   $ECR_REGISTRY/$image_name:latest"
+        else
+            echo "   $image_name:latest (local)"
+        fi
+    done
+else
+    image_name="${IMAGES[$IMAGE_TO_BUILD]}"
+    if [ "$AWS_ACCOUNT_ID" != "" ]; then
+        echo "   $ECR_REGISTRY/$image_name:latest"
+    else
+        echo "   $image_name:latest (local)"
+    fi
+fi
+
+echo ""
+echo "🎉 Build process completed!"
+echo ""
+echo "Usage examples:"
+echo "==============="
+echo "# Build all images:"
+echo "./build-all-images.sh all"
+echo ""
+echo "# Build specific image:"
+echo "./build-all-images.sh vllm-gpu"
+echo "./build-all-images.sh triton-dlc"
+echo ""
+echo "# Build and push to ECR:"
+echo "./build-all-images.sh vllm-gpu us-west-2 123456789012"
+echo ""
+echo "# Individual builds:"
+echo "cd images/vllm-gpu && ./build.sh"
+echo "cd images/triton-dlc && ./build.sh latest your-registry"

@@ -52,13 +52,13 @@ WORKDIR /app
 # Copy Triton model repository structure
 COPY triton-model-repository/ /models/
 
-# Copy application files
+# Copy application files from current directory
 COPY triton_server_wrapper.py .
 COPY triton_health_check.py .
-COPY requirements-triton.txt .
+COPY requirements.txt .
 
 # Install additional requirements
-RUN pip install -r requirements-triton.txt
+RUN pip install -r requirements.txt
 
 # Create a simple Triton server wrapper since we're using Python backend
 # The model.py file is already in the triton-model-repository structure
