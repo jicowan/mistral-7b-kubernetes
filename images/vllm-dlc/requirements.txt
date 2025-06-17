@@ -4,10 +4,10 @@
 # vLLM (compatible with PyTorch 2.6.0 in AWS DLC)
 vllm>=0.6.0
 
-# FastAPI server dependencies
-fastapi==0.110.0
-uvicorn[standard]==0.27.0
-pydantic==2.6.0
+# FastAPI server dependencies (compatible with vLLM 0.6+)
+fastapi>=0.115.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.9.0
 
 # ML dependencies
 transformers>=4.40.0
