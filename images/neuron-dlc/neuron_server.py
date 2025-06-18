@@ -770,12 +770,13 @@ async def generate_text(request: GenerateRequest):
             # Use optimized transformers-neuronx generation with direct sample method
             logger.info("🚀 Using optimized transformers-neuronx generation (direct sample)")
             
-            # Validate and clamp parameters to prevent numerical issues
-            temperature = max(0.1, min(2.0, request.temperature))  # Clamp between 0.1 and 2.0
-            top_p = max(0.1, min(1.0, request.top_p))              # Clamp between 0.1 and 1.0
-            top_k = max(1, min(100, request.top_k))                # Clamp between 1 and 100
+            # Use safer parameters to prevent numerical issues with bf16 precision
+            # The combination of low temperature + nucleus sampling can cause instability
+            temperature = 1.0  # Use default temperature for stability
+            top_p = 1.0        # Disable nucleus sampling to prevent conflicts
+            top_k = 50         # Use default top_k
             
-            logger.info(f"Using sampling parameters: temp={temperature}, top_p={top_p}, top_k={top_k}")
+            logger.info(f"Using safe sampling parameters: temp={temperature}, top_p={top_p}, top_k={top_k}")
             
             with torch.inference_mode():
                 generated_sequence = model.sample(
