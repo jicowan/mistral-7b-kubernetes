@@ -33,10 +33,11 @@ RUN pip install \
     pydantic==2.5.0 \
     requests==2.31.0
 
-# Install additional ML dependencies with updated versions for tokenizer compatibility
+# Install additional ML dependencies with transformers-neuronx for optimized Mistral support
 RUN pip install --upgrade \
     transformers>=4.35.0 \
     tokenizers>=0.15.0 \
+    transformers-neuronx \
     accelerate>=0.24.1 \
     sentencepiece==0.1.99
 

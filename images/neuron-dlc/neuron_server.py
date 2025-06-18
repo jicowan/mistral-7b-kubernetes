@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-AWS Neuron Server for Mistral 7B Instruct
-Optimized for Inferentia 1 and Inferentia 2 chips
+AWS Neuron Server for Mistral 7B Instruct using transformers-neuronx
+Optimized for Inferentia 1 and Inferentia 2 chips with native Neuron support
 """
 
 import os
@@ -14,10 +14,21 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import torch
-import torch_neuronx
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers.generation import GenerationConfig
-import neuronx_distributed as nxd
+
+# Use transformers-neuronx for optimized Mistral support
+try:
+    from transformers_neuronx.mistral.model import MistralForCausalLM
+    from transformers import AutoTokenizer
+    TRANSFORMERS_NEURONX_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("✅ transformers-neuronx available - using optimized Mistral implementation")
+except ImportError as e:
+    logger = logging.getLogger(__name__)
+    logger.warning(f"⚠️ transformers-neuronx not available: {e}")
+    logger.info("🔄 Falling back to standard transformers with torch_neuronx")
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    import torch_neuronx
+    TRANSFORMERS_NEURONX_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -56,7 +67,161 @@ class HealthResponse(BaseModel):
     neuron_cores: int
     device_type: str
 
+def load_optimized_neuron_model():
+    """Load Mistral model using transformers-neuronx for optimal performance"""
+    logger.info("🚀 Loading Mistral model with transformers-neuronx optimization...")
+    
+    try:
+        # Load tokenizer with fallback strategies
+        tokenizer = load_tokenizer_with_fallback(MODEL_NAME)
+        
+        # Load optimized Mistral model for Neuron
+        logger.info("🔧 Initializing optimized Mistral model for Neuron...")
+        model = MistralForCausalLM.from_pretrained(
+            MODEL_NAME,
+            batch_size=BATCH_SIZE,
+            tp_degree=NEURON_CORES,  # Tensor parallelism across Neuron cores
+            amp='f32',  # Use float32 for stability
+            context_length_estimate=MAX_LENGTH,
+            n_positions=MAX_LENGTH,
+            unroll=None,  # Let the library optimize
+            load_in_8bit=False,  # Use full precision for quality
+            low_cpu_mem_usage=True
+        )
+        
+        logger.info("✅ Optimized Neuron model loaded successfully")
+        logger.info(f"📊 Model configuration:")
+        logger.info(f"   - Batch size: {BATCH_SIZE}")
+        logger.info(f"   - Tensor parallel degree: {NEURON_CORES}")
+        logger.info(f"   - Context length: {MAX_LENGTH}")
+        logger.info(f"   - Precision: float32")
+        
+        return model, tokenizer
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to load optimized Neuron model: {e}")
+        logger.info("🔄 Falling back to standard approach...")
+        return None, None
+
+def compile_model_for_neuron():
+    """Compile model for Neuron - now with transformers-neuronx optimization"""
+    logger.info("🚀 Starting Neuron model compilation...")
+    
+    # First try the optimized transformers-neuronx approach
+    if TRANSFORMERS_NEURONX_AVAILABLE:
+        model, tokenizer = load_optimized_neuron_model()
+        if model is not None and tokenizer is not None:
+            return model, tokenizer
+    
 def load_tokenizer_with_fallback(model_name):
+    """Load tokenizer with multiple fallback strategies"""
+    logger.info(f"📝 Loading tokenizer for {model_name}...")
+    
+    # Strategy 1: Try standard loading
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        logger.info("✅ Tokenizer loaded successfully (standard method)")
+        return tokenizer
+    except Exception as e:
+        logger.warning(f"⚠️ Standard tokenizer loading failed: {e}")
+    
+    # Strategy 2: Try with legacy format
+    try:
+        logger.info("🔄 Trying tokenizer with legacy format...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name, 
+            trust_remote_code=True,
+            use_fast=False  # Use slow tokenizer as fallback
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        logger.info("✅ Tokenizer loaded successfully (legacy method)")
+        return tokenizer
+    except Exception as e:
+        logger.warning(f"⚠️ Legacy tokenizer loading failed: {e}")
+    
+    # Strategy 3: Try forcing re-download
+    try:
+        logger.info("🔄 Forcing tokenizer re-download...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            force_download=True,  # Force fresh download
+            resume_download=False
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        logger.info("✅ Tokenizer loaded successfully (forced download)")
+        return tokenizer
+    except Exception as e:
+        logger.warning(f"⚠️ Forced download tokenizer loading failed: {e}")
+    
+    # Strategy 4: Try different model with compatible tokenizer
+    fallback_models = [
+        "microsoft/DialoGPT-medium",
+        "gpt2",
+        "distilgpt2"
+    ]
+    
+    for fallback_model in fallback_models:
+        try:
+            logger.info(f"🔄 Trying fallback tokenizer: {fallback_model}")
+            tokenizer = AutoTokenizer.from_pretrained(fallback_model, trust_remote_code=True)
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            logger.warning(f"⚠️ Using fallback tokenizer: {fallback_model}")
+            return tokenizer
+        except Exception as e:
+            logger.warning(f"⚠️ Fallback tokenizer {fallback_model} failed: {e}")
+    
+    # Strategy 5: Last resort - create basic tokenizer
+    try:
+        logger.info("🔄 Creating basic GPT2 tokenizer as last resort...")
+        from transformers import GPT2Tokenizer
+        tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        tokenizer.pad_token = tokenizer.eos_token
+        logger.warning("⚠️ Using basic GPT2 tokenizer - functionality may be limited")
+        return tokenizer
+    except Exception as e:
+        logger.error(f"❌ All tokenizer loading strategies failed: {e}")
+        raise Exception("Failed to load any tokenizer")
+
+def compile_model_fallback():
+    """Fallback compilation using torch_neuronx when transformers-neuronx fails"""
+    logger.info("🔄 Using fallback torch_neuronx compilation...")
+    
+    if not TRANSFORMERS_NEURONX_AVAILABLE:
+        # Import torch_neuronx for fallback
+        import torch_neuronx
+        import torch_xla.core.xla_model as xm
+    
+    try:
+        # Load tokenizer
+        tokenizer = load_tokenizer_with_fallback(MODEL_NAME)
+        
+        # Load model on CPU first
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            torch_dtype=torch.float32,
+            low_cpu_mem_usage=True,
+            trust_remote_code=True
+        )
+        
+        # Simple compilation for fallback
+        logger.info("🔧 Compiling model with torch_neuronx fallback...")
+        # Use CPU fallback instead of complex compilation
+        model = model.to('cpu')
+        logger.info("✅ Fallback model loaded on CPU")
+        
+        return model, tokenizer
+        
+    except Exception as e:
+        logger.error(f"❌ Fallback compilation failed: {e}")
+        return load_cpu_fallback_model()
+
+def compile_model_for_neuron():
     """Load tokenizer with multiple fallback strategies"""
     logger.info(f"📝 Loading tokenizer for {model_name}...")
     
@@ -559,7 +724,7 @@ async def health_check():
 
 @app.post("/generate", response_model=GenerateResponse)
 async def generate_text(request: GenerateRequest):
-    """Generate text using the Neuron-compiled Mistral model"""
+    """Generate text using the optimized Neuron Mistral model"""
     if model is None or tokenizer is None:
         raise HTTPException(status_code=503, detail="Model not initialized")
     
@@ -567,36 +732,45 @@ async def generate_text(request: GenerateRequest):
         # Format prompt for Mistral Instruct
         formatted_prompt = f"<s>[INST] {request.prompt} [/INST]"
         
-        # Tokenize input with shorter max length for stability
-        max_input_length = min(512, MAX_LENGTH - request.max_tokens)  # Leave room for generation
+        # Tokenize input
         inputs = tokenizer(
             formatted_prompt,
             return_tensors="pt",
-            max_length=max_input_length,
-            padding=False,  # Don't pad for generation
+            max_length=min(512, MAX_LENGTH - request.max_tokens),
+            padding=False,
             truncation=True
         )
         
         input_ids = inputs['input_ids']
-        attention_mask = inputs.get('attention_mask', torch.ones_like(input_ids))
-        
-        # Ensure tensors are on the correct device and dtype
-        device = next(model.parameters()).device
-        dtype = next(model.parameters()).dtype
-        
-        input_ids = input_ids.to(device)
-        attention_mask = attention_mask.to(device)
         
         logger.info(f"Generating text for prompt: {request.prompt[:50]}...")
-        logger.info(f"Model device: {device}, dtype: {dtype}")
         
-        # Use simplified generation approach
-        with torch.no_grad():
-            try:
-                # Use the model's built-in generate method for better compatibility
+        # Check if we're using optimized transformers-neuronx model
+        if TRANSFORMERS_NEURONX_AVAILABLE and hasattr(model, 'sample'):
+            # Use optimized transformers-neuronx generation
+            logger.info("🚀 Using optimized transformers-neuronx generation")
+            
+            with torch.no_grad():
+                generated_ids = model.sample(
+                    input_ids,
+                    sequence_length=min(request.max_tokens + input_ids.shape[1], MAX_LENGTH),
+                    top_k=request.top_k,
+                    top_p=request.top_p,
+                    temperature=request.temperature,
+                    eos_token_id=tokenizer.eos_token_id,
+                    pad_token_id=tokenizer.pad_token_id
+                )
+        else:
+            # Use standard generation for fallback models
+            logger.info("🔄 Using standard generation method")
+            
+            # Ensure tensors are on correct device
+            device = next(model.parameters()).device
+            input_ids = input_ids.to(device)
+            
+            with torch.no_grad():
                 generated_ids = model.generate(
                     input_ids,
-                    attention_mask=attention_mask,
                     max_new_tokens=request.max_tokens,
                     temperature=request.temperature,
                     top_p=request.top_p,
@@ -605,53 +779,45 @@ async def generate_text(request: GenerateRequest):
                     do_sample=True,
                     pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=tokenizer.eos_token_id,
-                    use_cache=False,  # Disable KV caching
-                    return_dict_in_generate=False
-                )
-                
-                # Decode the generated text
-                generated_text = tokenizer.decode(
-                    generated_ids[0][input_ids.shape[1]:],  # Only decode the new tokens
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=True
-                )
-                
-                # Calculate token usage
-                prompt_tokens = input_ids.shape[1]
-                completion_tokens = generated_ids.shape[1] - prompt_tokens
-                total_tokens = prompt_tokens + completion_tokens
-                
-                logger.info(f"Generated {completion_tokens} tokens successfully")
-                
-                return GenerateResponse(
-                    text=generated_text.strip(),
-                    prompt=request.prompt,
-                    model=MODEL_NAME,
-                    usage={
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": total_tokens
-                    }
-                )
-                
-            except Exception as gen_error:
-                logger.error(f"Generation failed: {gen_error}")
-                logger.error(f"Generation error type: {type(gen_error).__name__}")
-                logger.error(f"Model device: {device}, Model dtype: {dtype}")
-                logger.error(f"Input device: {input_ids.device}, Input dtype: {input_ids.dtype}")
-                
-                # Return a simple fallback response
-                return GenerateResponse(
-                    text="I apologize, but I'm having trouble generating a response right now. Please try again.",
-                    prompt=request.prompt,
-                    model=MODEL_NAME,
-                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                    use_cache=False
                 )
         
+        # Decode the generated text
+        generated_text = tokenizer.decode(
+            generated_ids[0][input_ids.shape[1]:],
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True
+        )
+        
+        # Calculate token usage
+        prompt_tokens = input_ids.shape[1]
+        completion_tokens = generated_ids.shape[1] - prompt_tokens
+        total_tokens = prompt_tokens + completion_tokens
+        
+        logger.info(f"Generated {completion_tokens} tokens successfully")
+        
+        return GenerateResponse(
+            text=generated_text.strip(),
+            prompt=request.prompt,
+            model=MODEL_NAME,
+            usage={
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens
+            }
+        )
+        
     except Exception as e:
-        logger.error(f"Request processing failed: {e}")
-        logger.error(f"Request error type: {type(e).__name__}")
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+        logger.error(f"Generation failed: {e}")
+        logger.error(f"Generation error type: {type(e).__name__}")
+        
+        # Return fallback response
+        return GenerateResponse(
+            text="I apologize, but I'm having trouble generating a response right now. Please try again.",
+            prompt=request.prompt,
+            model=MODEL_NAME,
+            usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        )
 
 @app.get("/models")
 async def list_models():

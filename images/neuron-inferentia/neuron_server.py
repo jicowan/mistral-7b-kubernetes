@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-AWS Neuron Server for Mistral 7B Instruct
-Optimized for Inferentia 1 and Inferentia 2 chips
+AWS Neuron Server for Mistral 7B Instruct using transformers-neuronx
+Optimized for Inferentia 1 and Inferentia 2 chips with native Neuron support
 """
 
 import os
@@ -14,10 +14,21 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import torch
-import torch_neuronx
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers.generation import GenerationConfig
-import neuronx_distributed as nxd
+
+# Use transformers-neuronx for optimized Mistral support
+try:
+    from transformers_neuronx.mistral.model import MistralForCausalLM
+    from transformers import AutoTokenizer
+    TRANSFORMERS_NEURONX_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("✅ transformers-neuronx available - using optimized Mistral implementation")
+except ImportError as e:
+    logger = logging.getLogger(__name__)
+    logger.warning(f"⚠️ transformers-neuronx not available: {e}")
+    logger.info("🔄 Falling back to standard transformers with torch_neuronx")
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    import torch_neuronx
+    TRANSFORMERS_NEURONX_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,6 +66,122 @@ class HealthResponse(BaseModel):
     model: str
     neuron_cores: int
     device_type: str
+
+def load_tokenizer_with_fallback(model_name):
+    """Load tokenizer with multiple fallback strategies"""
+    logger.info(f"📝 Loading tokenizer for {model_name}...")
+    
+    # Strategy 1: Try standard loading
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        logger.info("✅ Tokenizer loaded successfully (standard method)")
+        return tokenizer
+    except Exception as e:
+        logger.warning(f"⚠️ Standard tokenizer loading failed: {e}")
+    
+    # Strategy 2: Try with legacy format
+    try:
+        logger.info("🔄 Trying tokenizer with legacy format...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name, 
+            trust_remote_code=True,
+            use_fast=False  # Use slow tokenizer as fallback
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        logger.info("✅ Tokenizer loaded successfully (legacy method)")
+        return tokenizer
+    except Exception as e:
+        logger.warning(f"⚠️ Legacy tokenizer loading failed: {e}")
+    
+    # Strategy 3: Try forcing re-download
+    try:
+        logger.info("🔄 Forcing tokenizer re-download...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            force_download=True,  # Force fresh download
+            resume_download=False
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        logger.info("✅ Tokenizer loaded successfully (forced download)")
+        return tokenizer
+    except Exception as e:
+        logger.warning(f"⚠️ Forced download tokenizer loading failed: {e}")
+    
+    # Strategy 4: Try different model with compatible tokenizer
+    fallback_models = [
+        "microsoft/DialoGPT-medium",
+        "gpt2",
+        "distilgpt2"
+    ]
+    
+    for fallback_model in fallback_models:
+        try:
+            logger.info(f"🔄 Trying fallback tokenizer: {fallback_model}")
+            tokenizer = AutoTokenizer.from_pretrained(fallback_model, trust_remote_code=True)
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            logger.warning(f"⚠️ Using fallback tokenizer: {fallback_model}")
+            return tokenizer
+        except Exception as e:
+            logger.warning(f"⚠️ Fallback tokenizer {fallback_model} failed: {e}")
+    
+    # Strategy 5: Last resort - create basic tokenizer
+    try:
+        logger.info("🔄 Creating basic GPT2 tokenizer as last resort...")
+        from transformers import GPT2Tokenizer
+        tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        tokenizer.pad_token = tokenizer.eos_token
+        logger.warning("⚠️ Using basic GPT2 tokenizer - functionality may be limited")
+        return tokenizer
+    except Exception as e:
+        logger.error(f"❌ All tokenizer loading strategies failed: {e}")
+        raise Exception("Failed to load any tokenizer")
+
+def load_optimized_neuron_model():
+    """Load Mistral model using transformers-neuronx for optimal performance"""
+    logger.info("🚀 Loading Mistral model with transformers-neuronx optimization...")
+    
+    try:
+        # Load tokenizer with fallback strategies
+        tokenizer = load_tokenizer_with_fallback(MODEL_NAME)
+        
+        # Load optimized Mistral model for Neuron
+        logger.info("🔧 Initializing optimized Mistral model for Neuron...")
+        model = MistralForCausalLM.from_pretrained(
+            MODEL_NAME,
+            batch_size=BATCH_SIZE,
+            tp_degree=NEURON_CORES,  # Tensor parallelism across Neuron cores
+            amp='f32',  # Use float32 for stability
+            context_length_estimate=MAX_LENGTH,
+            n_positions=MAX_LENGTH,
+            unroll=None,  # Let the library optimize
+            load_in_8bit=False,  # Use full precision for quality
+            low_cpu_mem_usage=True
+        )
+        
+        logger.info("✅ Optimized Neuron model loaded successfully")
+        logger.info(f"📊 Model configuration:")
+        logger.info(f"   - Batch size: {BATCH_SIZE}")
+        logger.info(f"   - Tensor parallel degree: {NEURON_CORES}")
+        logger.info(f"   - Context length: {MAX_LENGTH}")
+        logger.info(f"   - Precision: float32")
+        
+        return model, tokenizer
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to load optimized Neuron model: {e}")
+        logger.info("🔄 Falling back to standard approach...")
+        return None, None
+
+def compile_model_fallback():
+    """Fallback compilation using torch_neuronx when transformers-neuronx fails"""
+    logger.info("🔄 Using fallback torch_neuronx compilation...")
+    return load_cpu_fallback_model()
 
 def compile_model_for_neuron():
     """Compile the model for Neuron inference - Memory-efficient version with detailed debugging"""

@@ -17,12 +17,14 @@ RUN apt-get update && apt-get install -y \
 # Upgrade pip and install Python dependencies
 RUN pip install --upgrade pip
 
-# Install required packages
+# Install required packages with transformers-neuronx for optimized Mistral support
 RUN pip install \
     fastapi \
     uvicorn \
     pydantic \
-    transformers \
+    transformers>=4.35.0 \
+    tokenizers>=0.15.0 \
+    transformers-neuronx \
     accelerate \
     sentencepiece \
     torch-neuronx \
