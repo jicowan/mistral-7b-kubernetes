@@ -156,19 +156,36 @@ def load_optimized_neuron_model():
         # Load tokenizer with fallback strategies
         tokenizer = load_tokenizer_with_fallback(MODEL_NAME)
         
-        # Load optimized Mistral model for Neuron
-        logger.info("🔧 Initializing optimized Mistral model for Neuron...")
-        model = MistralForCausalLM.from_pretrained(
-            MODEL_NAME,
-            batch_size=BATCH_SIZE,
-            tp_degree=TENSOR_PARALLEL_SIZE,  # Use explicit tensor parallel size
-            amp='f32',  # Use float32 for stability
-            context_length_estimate=MAX_LENGTH,
-            n_positions=MAX_LENGTH,
-            unroll=None,  # Let the library optimize
-            load_in_8bit=False,  # Use full precision for quality
-            low_cpu_mem_usage=True
-        )
+        # Load and modify config for Neuron
+        logger.info("🔧 Loading and configuring model for Neuron...")
+        from transformers import AutoConfig
+        config = AutoConfig.from_pretrained(MODEL_NAME, trust_remote_code=True)
+        
+        # Add neuron-specific configuration
+        config.amp = 'f32'  # Use float32 for stability
+        config.tp_degree = TENSOR_PARALLEL_SIZE  # Tensor parallelism degree
+        config.batch_size = BATCH_SIZE
+        config.sequence_length = MAX_LENGTH
+        config.n_positions = MAX_LENGTH
+        
+        logger.info("🔧 Creating optimized Mistral model for Neuron...")
+        model = MistralForCausalLM(config)
+        
+        # Load the weights using the correct method
+        logger.info("📥 Loading model weights...")
+        try:
+            # Try different weight loading methods
+            model.load_state_dict_dir(MODEL_NAME)
+        except Exception as load_error:
+            logger.warning(f"⚠️ load_state_dict_dir failed: {load_error}")
+            try:
+                # Fallback to safetensors
+                model.load_safetensors(MODEL_NAME)
+            except Exception as safetensors_error:
+                logger.warning(f"⚠️ load_safetensors failed: {safetensors_error}")
+                # Use the from_pretrained class method instead
+                logger.info("🔄 Using from_pretrained method...")
+                model = MistralForCausalLM.from_pretrained(MODEL_NAME)
         
         logger.info("✅ Optimized Neuron model loaded successfully")
         logger.info(f"📊 Model configuration:")
@@ -182,6 +199,7 @@ def load_optimized_neuron_model():
         
     except Exception as e:
         logger.error(f"❌ Failed to load optimized Neuron model: {e}")
+        logger.error(f"🔍 Error details: {type(e).__name__}: {str(e)}")
         logger.info("🔄 Falling back to standard approach...")
         return None, None
 
