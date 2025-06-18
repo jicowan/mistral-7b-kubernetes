@@ -37,7 +37,7 @@ RUN pip install \
 RUN pip install --upgrade \
     transformers>=4.35.0 \
     tokenizers>=0.15.0 \
-    accelerate==0.24.1 \
+    accelerate>=0.24.1 \
     sentencepiece==0.1.99
 
 # Create app directory

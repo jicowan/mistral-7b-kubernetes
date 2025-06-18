@@ -179,15 +179,17 @@ def compile_model_for_neuron():
     # Load model on CPU with memory optimization
     logger.info("🔄 Loading model on CPU with memory optimization...")
     try:
-        # Use minimal memory loading
+        # Use minimal memory loading without device_map to avoid accelerate requirement
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,
             torch_dtype=torch.float32,  # Start with float32, will optimize later
             low_cpu_mem_usage=True,
             trust_remote_code=True,
-            device_map="cpu",  # Explicitly keep on CPU initially
-            offload_folder="/tmp/model_offload",  # Offload to disk if needed
+            # Remove device_map to avoid accelerate requirement
+            # offload_folder="/tmp/model_offload",  # Comment out to avoid accelerate requirement
         )
+        # Explicitly move to CPU after loading
+        model = model.to('cpu')
         logger.info("✅ Model loaded on CPU successfully")
         log_memory_usage("model_loaded_cpu")
     except Exception as e:
@@ -423,13 +425,16 @@ def load_cpu_fallback_model():
         # Use robust tokenizer loading
         tokenizer = load_tokenizer_with_fallback(MODEL_NAME)
         
+        # Load model without device_map to avoid accelerate requirement
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,
             torch_dtype=torch.float32,  # Full precision for CPU compatibility
-            device_map="cpu",
             low_cpu_mem_usage=True,
             trust_remote_code=True
+            # Remove device_map="cpu" to avoid accelerate requirement
         )
+        # Explicitly move to CPU after loading
+        model = model.to('cpu')
         
         logger.info("✅ CPU fallback model loaded successfully (float32)")
         logger.warning("⚠️ Running on CPU with float32 - performance will be limited")

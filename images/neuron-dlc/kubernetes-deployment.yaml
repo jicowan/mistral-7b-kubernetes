@@ -55,8 +55,6 @@ spec:
             secretKeyRef:
               name: hugging-face-token
               key: token
-        - name: TRANSFORMERS_CACHE
-          value: "/tmp/transformers_cache"
         - name: HF_HOME
           value: "/tmp/hf_home"
         - name: TOKENIZERS_PARALLELISM
