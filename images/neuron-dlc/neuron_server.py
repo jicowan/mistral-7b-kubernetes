@@ -857,9 +857,56 @@ async def health_check():
 
 @app.post("/generate", response_model=GenerateResponse)
 async def generate_text(request: GenerateRequest):
-    """Generate text using the optimized Neuron Mistral model"""
+    """Generate text using the optimized Neuron Mistral model with guaranteed model loading"""
+    global model, tokenizer
+    
+    # GUARANTEED MODEL LOADING - Load model if not already loaded
     if model is None or tokenizer is None:
-        raise HTTPException(status_code=503, detail="Model not initialized")
+        logger.warning("⚠️ Model not loaded, attempting emergency loading...")
+        
+        # Try to load the compiled Neuron model first
+        try:
+            if os.path.exists(f"{COMPILED_MODEL_PATH}/neuron_model.pt"):
+                logger.info("🔧 Loading pre-compiled Neuron model...")
+                result = load_compiled_model()
+                if result and len(result) == 2:
+                    temp_model, temp_tokenizer = result
+                    if temp_model is not None and temp_tokenizer is not None:
+                        model = temp_model
+                        tokenizer = temp_tokenizer
+                        logger.info("✅ Emergency Neuron model loaded successfully!")
+                    else:
+                        raise Exception("Compiled model loading returned None")
+                else:
+                    raise Exception("Compiled model loading failed")
+            else:
+                raise Exception("No compiled model found")
+                
+        except Exception as neuron_error:
+            logger.warning(f"⚠️ Emergency Neuron loading failed: {neuron_error}")
+            logger.info("🔧 Loading emergency CPU model with bfloat16...")
+            
+            # Emergency CPU model loading with stable configuration
+            tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME,
+                torch_dtype=torch.bfloat16,  # Use bfloat16 for numerical stability
+                device_map="cpu",
+                low_cpu_mem_usage=True,
+                trust_remote_code=True
+            )
+            
+            logger.info("✅ Emergency CPU model loaded successfully!")
+            logger.info(f"🔧 Model type: {type(model).__name__}")
+            logger.info(f"🔧 Model dtype: {next(model.parameters()).dtype}")
+    
+    # Final check
+    if model is None or tokenizer is None:
+        logger.error("❌ CRITICAL: Failed to load any model")
+        raise HTTPException(status_code=503, detail="Model loading failed - please try again")
     
     try:
         # Format prompt for Mistral Instruct
