@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 # Model configuration
 MODEL_NAME = os.getenv("MODEL_NAME", "mistralai/Mistral-7B-Instruct-v0.3")
 NEURON_CORES = int(os.getenv("NEURON_CORES", "2"))  # Number of Neuron cores to use
+TENSOR_PARALLEL_SIZE = int(os.getenv("TENSOR_PARALLEL_SIZE", str(NEURON_CORES)))  # Tensor parallelism degree
 MAX_LENGTH = int(os.getenv("MAX_LENGTH", "2048"))  # Reduced for Inferentia
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "1"))
 SEQUENCE_LENGTH = int(os.getenv("SEQUENCE_LENGTH", "2048"))
@@ -85,7 +86,7 @@ def load_optimized_neuron_model():
         model = MistralForCausalLM.from_pretrained(
             MODEL_NAME,
             batch_size=BATCH_SIZE,
-            tp_degree=NEURON_CORES,  # Tensor parallelism across Neuron cores
+            tp_degree=TENSOR_PARALLEL_SIZE,  # Use explicit tensor parallel size
             amp='f32',  # Use float32 for stability
             context_length_estimate=MAX_LENGTH,
             n_positions=MAX_LENGTH,
@@ -97,7 +98,8 @@ def load_optimized_neuron_model():
         logger.info("✅ Optimized Neuron model loaded successfully")
         logger.info(f"📊 Model configuration:")
         logger.info(f"   - Batch size: {BATCH_SIZE}")
-        logger.info(f"   - Tensor parallel degree: {NEURON_CORES}")
+        logger.info(f"   - Tensor parallel degree: {TENSOR_PARALLEL_SIZE}")
+        logger.info(f"   - Neuron cores: {NEURON_CORES}")
         logger.info(f"   - Context length: {MAX_LENGTH}")
         logger.info(f"   - Precision: float32")
         

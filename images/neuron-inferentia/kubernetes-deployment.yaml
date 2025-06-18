@@ -24,13 +24,13 @@ spec:
         - name: MODEL_NAME
           value: "mistralai/Mistral-7B-Instruct-v0.3"
         - name: NEURON_CORES
-          value: "2"  # Adjust based on instance type
+          value: "2"
+        - name: TENSOR_PARALLEL_SIZE
+          value: "2"
         - name: MAX_LENGTH
-          value: "4096"  # Reduced for Inferentia
+          value: "4096"
         - name: BATCH_SIZE
           value: "1"
-        - name: SEQUENCE_LENGTH
-          value: "4096"
         - name: COMPILED_MODEL_PATH
           value: "/tmp/neuron_compiled_model"
         - name: HOST
@@ -41,8 +41,10 @@ spec:
           value: "2"
         - name: NEURON_CC_FLAGS
           value: "--model-type=transformer-inference --optlevel=1 --tensor-parallel-size=2"
-        - name: TENSOR_PARALLEL_SIZE
-          value: '2'
+        - name: HF_HOME
+          value: "/tmp/hf_home"
+        - name: TOKENIZERS_PARALLELISM
+          value: "false"
         - name: HF_TOKEN
           valueFrom:
             secretKeyRef:
