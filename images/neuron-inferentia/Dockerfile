@@ -4,7 +4,7 @@ FROM public.ecr.aws/neuron/pytorch-inference-neuronx:2.1.2-neuronx-py310-sdk2.18
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV NEURON_RT_NUM_CORES=2
-ENV NEURON_CC_FLAGS="--model-type=transformer"
+ENV NEURON_CC_FLAGS="--target=inf2 --model-type=transformer"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \

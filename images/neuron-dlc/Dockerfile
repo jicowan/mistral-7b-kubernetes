@@ -6,7 +6,7 @@ FROM 763104351884.dkr.ecr.us-west-2.amazonaws.com/pytorch-inference-neuronx:2.1.
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV NEURON_RT_NUM_CORES=2
-ENV NEURON_CC_FLAGS="--model-type=transformer"
+ENV NEURON_CC_FLAGS="--target=inf2 --model-type=transformer"
 
 # AWS Neuron DLC already includes:
 # - PyTorch 2.1.2 with Neuron extensions
