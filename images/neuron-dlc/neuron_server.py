@@ -644,72 +644,107 @@ def load_compiled_model():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize and cleanup the Neuron model"""
+    """Initialize and cleanup the Neuron model with proper error handling"""
     global model, tokenizer
     
     logger.info("🚀 Starting Neuron model initialization...")
     
+    # First, try the optimized transformers-neuronx approach
     try:
-        # Check if compiled model exists
-        if os.path.exists(f"{COMPILED_MODEL_PATH}/neuron_model.pt"):
-            logger.info("📁 Found pre-compiled model, loading...")
-            try:
-                model, tokenizer = load_compiled_model()
-                logger.info("✅ Pre-compiled Neuron model loaded successfully")
-            except Exception as load_error:
-                logger.error(f"❌ Failed to load pre-compiled model: {load_error}")
-                logger.info("🔄 Falling back to compilation...")
-                model, tokenizer = compile_model_for_neuron()
+        logger.info("🔧 Attempting optimized transformers-neuronx loading...")
+        model, tokenizer = load_optimized_neuron_model()
+        
+        if model is not None and tokenizer is not None:
+            logger.info("✅ Optimized transformers-neuronx model loaded successfully!")
+            logger.info(f"📊 Model: {MODEL_NAME}")
+            logger.info(f"🔧 Model type: {type(model).__name__}")
+            logger.info(f"🎯 Has sample method: {hasattr(model, 'sample')}")
+            logger.info(f"🚀 Max length: {MAX_LENGTH}")
+            logger.info("🎯 Server ready for optimized Neuron inference!")
+            
+            yield
+            return
         else:
-            logger.info("🔨 No pre-compiled model found, starting compilation...")
-            model, tokenizer = compile_model_for_neuron()
+            logger.warning("⚠️ Optimized transformers-neuronx returned None, trying fallback...")
+            
+    except Exception as e:
+        logger.error(f"❌ Optimized transformers-neuronx failed: {e}")
+        logger.info("🔄 Trying torch_neuronx fallback...")
+    
+    # Second, try torch_neuronx approach
+    try:
+        logger.info("🔧 Attempting torch_neuronx compilation...")
+        model, tokenizer = compile_model_for_neuron()
         
-        # Verify model is working
-        if model is None or tokenizer is None:
-            raise Exception("Model or tokenizer is None after initialization")
+        if model is not None and tokenizer is not None:
+            logger.info("✅ torch_neuronx model compiled successfully!")
+            logger.info(f"📊 Model: {MODEL_NAME}")
+            logger.info(f"🔧 Model type: {type(model).__name__}")
+            logger.info(f"🎯 Has generate method: {hasattr(model, 'generate')}")
+            logger.info(f"🚀 Max length: {MAX_LENGTH}")
+            logger.info("🎯 Server ready for torch_neuronx inference!")
+            
+            yield
+            return
+        else:
+            logger.warning("⚠️ torch_neuronx returned None, trying CPU fallback...")
+            
+    except Exception as e:
+        logger.error(f"❌ torch_neuronx compilation failed: {e}")
+        logger.info("🔄 Falling back to CPU model...")
+    
+    # Final fallback: CPU model with proper configuration
+    try:
+        logger.info("🔧 Loading CPU fallback model with optimized settings...")
         
-        logger.info(f"✅ Neuron model initialized successfully with {NEURON_CORES} cores")
+        # Load tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        
+        # Load model with optimized settings for stability
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            torch_dtype=torch.float16,  # Use float16 instead of float32 for better stability
+            device_map="cpu",
+            low_cpu_mem_usage=True,
+            trust_remote_code=True
+        )
+        
+        # Move to CPU explicitly
+        model = model.to("cpu")
+        
+        logger.warning("⚠️ Running on CPU with float16 - performance will be limited")
+        logger.info("✅ CPU fallback model loaded successfully!")
         logger.info(f"📊 Model: {MODEL_NAME}")
-        logger.info(f"🔧 Max length: {MAX_LENGTH}")
-        logger.info("🎯 Server ready for requests!")
+        logger.info(f"🔧 Model type: {type(model).__name__}")
+        logger.info(f"🎯 Has generate method: {hasattr(model, 'generate')}")
+        logger.info("🎯 Server ready for CPU inference!")
         
         yield
         
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize Neuron model: {e}")
-        logger.info("🔄 Attempting CPU fallback...")
+    except Exception as cpu_error:
+        logger.error(f"❌ CPU fallback also failed: {cpu_error}")
+        logger.error("💥 All model loading approaches failed!")
         
-        try:
-            # CPU fallback
-            logger.info("Loading model on CPU as fallback...")
-            tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-            if tokenizer.pad_token is None:
-                tokenizer.pad_token = tokenizer.eos_token
-            
-            model = AutoModelForCausalLM.from_pretrained(
-                MODEL_NAME,
-                torch_dtype=torch.float32,  # Changed from float16 to float32 for CPU compatibility
-                device_map="cpu",
-                low_cpu_mem_usage=True,
-                trust_remote_code=True
-            )
-            
-            logger.info("✅ CPU fallback model loaded successfully (float32)")
-            logger.warning("⚠️ Running on CPU with float32 - performance will be limited")
-            
-            yield
-            
-        except Exception as fallback_error:
-            logger.error(f"❌ CPU fallback also failed: {fallback_error}")
-            raise Exception("Both Neuron compilation and CPU fallback failed")
+        # Set dummy model to prevent crashes
+        model = None
+        tokenizer = None
+        
+        logger.error("🚨 Server starting without model - all requests will fail")
+        yield
     
     finally:
-        if model:
-            logger.info("🧹 Cleaning up model resources...")
-            del model
-        if tokenizer:
-            del tokenizer
-        logger.info("✅ Cleanup completed")
+        # Cleanup
+        logger.info("🧹 Cleaning up resources...")
+        try:
+            if model:
+                del model
+            if tokenizer:
+                del tokenizer
+            logger.info("✅ Cleanup completed")
+        except Exception as cleanup_error:
+            logger.error(f"⚠️ Cleanup error: {cleanup_error}")
 
 # Create FastAPI app with lifespan
 app = FastAPI(
@@ -795,25 +830,29 @@ async def generate_text(request: GenerateRequest):
                 else:
                     generated_ids = generated_sequence
         else:
-            # Use standard generation for fallback models
-            logger.info("🔄 Using standard generation method")
+            # Use standard generation for fallback models (CPU)
+            logger.info("🔄 Using standard generation method (CPU fallback)")
             
             # Ensure tensors are on correct device
             device = next(model.parameters()).device
             input_ids = input_ids.to(device)
             
+            logger.info(f"Model device: {device}")
+            
+            # Use optimized generation parameters for CPU model stability
             with torch.no_grad():
                 generated_ids = model.generate(
                     input_ids,
                     max_new_tokens=request.max_tokens,
-                    temperature=request.temperature,
-                    top_p=request.top_p,
-                    top_k=request.top_k,
-                    repetition_penalty=request.repetition_penalty,
+                    temperature=1.0,  # Use stable temperature
+                    top_p=1.0,        # Disable nucleus sampling
+                    top_k=50,         # Use reasonable top_k
+                    repetition_penalty=1.0,  # Disable repetition penalty
                     do_sample=True,
                     pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=tokenizer.eos_token_id,
-                    use_cache=False
+                    use_cache=False,
+                    early_stopping=True
                 )
         
         # Decode the generated text
