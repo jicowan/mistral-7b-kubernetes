@@ -131,10 +131,18 @@ def compile_model_for_neuron():
     
     # First try the optimized transformers-neuronx approach
     if TRANSFORMERS_NEURONX_AVAILABLE:
+        logger.info("🔧 Attempting transformers-neuronx optimization...")
         model, tokenizer = load_optimized_neuron_model()
         if model is not None and tokenizer is not None:
+            logger.info("✅ transformers-neuronx model loaded successfully!")
             return model, tokenizer
+        else:
+            logger.warning("⚠️ transformers-neuronx failed, falling back to torch_neuronx...")
+    else:
+        logger.info("⚠️ transformers-neuronx not available, using torch_neuronx fallback...")
     
+    # Fallback to torch_neuronx compilation
+    return compile_model_for_neuron_fallback()
 def load_tokenizer_with_fallback(model_name):
     """Load tokenizer with multiple fallback strategies"""
     logger.info(f"📝 Loading tokenizer for {model_name}...")
@@ -238,7 +246,7 @@ def compile_model_fallback():
         logger.error(f"❌ Fallback compilation failed: {e}")
         return load_cpu_fallback_model()
 
-def compile_model_for_neuron():
+def load_tokenizer_with_fallback(model_name):
     """Load tokenizer with multiple fallback strategies"""
     logger.info(f"📝 Loading tokenizer for {model_name}...")
     
@@ -313,9 +321,9 @@ def compile_model_for_neuron():
         logger.error(f"❌ All tokenizer loading strategies failed: {e}")
         raise Exception("Failed to load any tokenizer")
 
-def compile_model_for_neuron():
-    """Compile the model for Neuron inference - Memory-efficient version with detailed debugging"""
-    logger.info("🚀 Starting memory-efficient Neuron compilation with detailed debugging...")
+def compile_model_for_neuron_fallback():
+    """Compile the model for Neuron inference using torch_neuronx fallback - Memory-efficient version with detailed debugging"""
+    logger.info("🚀 Starting memory-efficient Neuron compilation with torch_neuronx fallback...")
     
     try:
         import torch_xla.core.xla_model as xm
