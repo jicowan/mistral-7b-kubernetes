@@ -120,6 +120,27 @@ build_image() {
     
     if [ $? -eq 0 ]; then
         echo "✅ $image_key build completed successfully"
+        
+        # If pushing to ECR, ensure latest tag is properly applied
+        if [ "$AWS_ACCOUNT_ID" != "" ]; then
+            echo "🏷️  Ensuring latest tag is properly applied..."
+            local full_image_name="$ECR_REGISTRY/$image_name:latest"
+            
+            # Re-tag to ensure latest tag
+            docker tag $image_name:latest $full_image_name
+            
+            # Push with explicit latest tag
+            echo "📤 Pushing $full_image_name..."
+            docker push $full_image_name
+            
+            if [ $? -eq 0 ]; then
+                echo "✅ Successfully pushed $full_image_name"
+            else
+                echo "❌ Failed to push $full_image_name"
+                cd - > /dev/null
+                return 1
+            fi
+        fi
     else
         echo "❌ $image_key build failed"
         cd - > /dev/null
