@@ -24,32 +24,38 @@ High-performance inference server for Mistral 7B Instruct with multiple deployme
 
 ### Build Specific Image
 ```bash
+# Build vLLM + Neuron DLC (Recommended for Inferentia2)
+./build-all-images.sh vllm-neuron-dlc
+
 # Build vLLM GPU image
 ./build-all-images.sh vllm-gpu
 
 # Build Triton DLC image  
 ./build-all-images.sh triton-dlc
-
-# Build Neuron Inferentia image
-./build-all-images.sh neuron-inferentia
 ```
 
 ### Individual Image Build
 ```bash
+# Recommended approach for Inferentia2
+cd images/vllm-neuron-dlc
+./build.sh
+
+# GPU approach
 cd images/vllm-gpu
 ./build.sh
 ```
 
 ## Available Images
 
-| Image | Directory | Description | Hardware | Performance |
-|-------|-----------|-------------|----------|-------------|
-| **vllm-gpu** | `images/vllm-gpu/` | vLLM + NVIDIA GPUs | A10G, L4, V100 | Highest |
-| **triton-gpu** | `images/triton-gpu/` | Triton + vLLM + GPUs | A10G, L4, V100 | High |
-| **neuron-inferentia** | `images/neuron-inferentia/` | AWS Neuron + Inferentia | Inf1, Inf2 | Medium |
-| **vllm-dlc** | `images/vllm-dlc/` | vLLM + AWS DLC | A10G, L4, V100 | Highest |
-| **triton-dlc** | `images/triton-dlc/` | Triton + AWS DLC | A10G, L4, V100 | High |
-| **neuron-dlc** | `images/neuron-dlc/` | Neuron + AWS DLC | Inf1, Inf2 | Medium |
+| Image | Directory | Description | Hardware | Performance | Status |
+|-------|-----------|-------------|----------|-------------|---------|
+| **vllm-neuron-dlc** | `images/vllm-neuron-dlc/` | vLLM + AWS Neuron DLC | Inf2 | Highest | **Recommended** |
+| **vllm-gpu** | `images/vllm-gpu/` | vLLM + NVIDIA GPUs | A10G, L4, V100 | Highest | Production |
+| **triton-gpu** | `images/triton-gpu/` | Triton + vLLM + GPUs | A10G, L4, V100 | High | Production |
+| **neuron-inferentia** | `images/neuron-inferentia/` | AWS Neuron + Inferentia | Inf1, Inf2 | Medium | Legacy |
+| **vllm-dlc** | `images/vllm-dlc/` | vLLM + AWS DLC | A10G, L4, V100 | Highest | Production |
+| **triton-dlc** | `images/triton-dlc/` | Triton + AWS DLC | A10G, L4, V100 | High | Production |
+| **neuron-dlc** | `images/neuron-dlc/` | Neuron + AWS DLC | Inf1, Inf2 | Medium | Legacy |
 
 ## Configuration
 

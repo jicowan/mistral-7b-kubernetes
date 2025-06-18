@@ -4,13 +4,14 @@
 # Usage: ./build-all-images.sh [IMAGE_NAME] [AWS_REGION] [AWS_ACCOUNT_ID]
 # 
 # IMAGE_NAME options:
-#   all (default)     - Build all images
-#   vllm-gpu         - vLLM with NVIDIA GPUs
-#   triton-gpu       - Triton with NVIDIA GPUs  
-#   neuron-inferentia - Neuron with AWS Inferentia
-#   vllm-dlc         - vLLM with AWS DLC
-#   triton-dlc       - Triton with AWS DLC
-#   neuron-dlc       - Neuron with AWS DLC
+#   all (default)        - Build all images
+#   vllm-gpu            - vLLM with NVIDIA GPUs
+#   triton-gpu          - Triton with NVIDIA GPUs  
+#   neuron-inferentia   - Neuron with AWS Inferentia
+#   vllm-dlc            - vLLM with AWS DLC
+#   triton-dlc          - Triton with AWS DLC
+#   neuron-dlc          - Neuron with AWS DLC
+#   vllm-neuron-dlc     - vLLM + Neuron DLC (Recommended for Inferentia2)
 
 set -e
 
@@ -28,6 +29,7 @@ declare -A IMAGES=(
     ["vllm-dlc"]="vllm-mistral-7b-dlc"
     ["triton-dlc"]="triton-mistral-7b-dlc"
     ["neuron-dlc"]="neuron-mistral-7b-dlc"
+    ["vllm-neuron-dlc"]="vllm-mistral-7b-neuron"
 )
 
 echo "🚀 Building Mistral 7B Container Images"
@@ -201,10 +203,10 @@ echo "./build-all-images.sh all"
 echo ""
 echo "# Build specific image:"
 echo "./build-all-images.sh vllm-gpu"
-echo "./build-all-images.sh triton-dlc"
+echo "./build-all-images.sh vllm-neuron-dlc"
 echo ""
 echo "# Build and push to ECR:"
-echo "./build-all-images.sh vllm-gpu us-west-2 123456789012"
+echo "./build-all-images.sh vllm-neuron-dlc us-west-2 123456789012"
 echo ""
 echo "# Individual builds:"
 echo "cd images/vllm-gpu && ./build.sh"
