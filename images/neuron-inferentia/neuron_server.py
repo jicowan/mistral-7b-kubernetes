@@ -156,36 +156,30 @@ def load_optimized_neuron_model():
         # Load tokenizer with fallback strategies
         tokenizer = load_tokenizer_with_fallback(MODEL_NAME)
         
-        # Load and modify config for Neuron
-        logger.info("🔧 Loading and configuring model for Neuron...")
+        # Use the official NeuronAutoModelForCausalLM API
+        logger.info("🔧 Loading model with NeuronAutoModelForCausalLM...")
+        from transformers_neuronx import NeuronAutoModelForCausalLM, HuggingFaceGenerationModelAdapter
         from transformers import AutoConfig
-        config = AutoConfig.from_pretrained(MODEL_NAME, trust_remote_code=True)
         
-        # Add neuron-specific configuration
-        config.amp = 'f32'  # Use float32 for stability
-        config.tp_degree = TENSOR_PARALLEL_SIZE  # Tensor parallelism degree
-        config.batch_size = BATCH_SIZE
-        config.sequence_length = MAX_LENGTH
-        config.n_positions = MAX_LENGTH
+        # Load model with correct tensor parallelism configuration
+        neuron_model = NeuronAutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            batch_size=BATCH_SIZE,                    # Batch size for compilation
+            n_positions=MAX_LENGTH,                   # Maximum sequence length
+            tp_degree=TENSOR_PARALLEL_SIZE,           # Tensor parallelism degree (2 cores)
+            amp='bf16',                               # Use bfloat16 for better performance
+            context_length_estimate=min(512, MAX_LENGTH//2),  # Context encoding optimization
+            trust_remote_code=True
+        )
         
-        logger.info("🔧 Creating optimized Mistral model for Neuron...")
-        model = MistralForCausalLM(config)
+        # Compile model for Neuron
+        logger.info("⚙️ Compiling model for Neuron (this may take several minutes)...")
+        neuron_model.to_neuron()
         
-        # Load the weights using the correct method
-        logger.info("📥 Loading model weights...")
-        try:
-            # Try different weight loading methods
-            model.load_state_dict_dir(MODEL_NAME)
-        except Exception as load_error:
-            logger.warning(f"⚠️ load_state_dict_dir failed: {load_error}")
-            try:
-                # Fallback to safetensors
-                model.load_safetensors(MODEL_NAME)
-            except Exception as safetensors_error:
-                logger.warning(f"⚠️ load_safetensors failed: {safetensors_error}")
-                # Use the from_pretrained class method instead
-                logger.info("🔄 Using from_pretrained method...")
-                model = MistralForCausalLM.from_pretrained(MODEL_NAME)
+        # Wrap with HuggingFace adapter for generate() API
+        logger.info("🔧 Setting up HuggingFace generation adapter...")
+        config = AutoConfig.from_pretrained(MODEL_NAME)
+        model = HuggingFaceGenerationModelAdapter(config, neuron_model)
         
         logger.info("✅ Optimized Neuron model loaded successfully")
         logger.info(f"📊 Model configuration:")
@@ -193,7 +187,10 @@ def load_optimized_neuron_model():
         logger.info(f"   - Tensor parallel degree: {TENSOR_PARALLEL_SIZE}")
         logger.info(f"   - Neuron cores: {NEURON_CORES}")
         logger.info(f"   - Context length: {MAX_LENGTH}")
-        logger.info(f"   - Precision: float32")
+        logger.info(f"   - Precision: bfloat16")
+        logger.info(f"   - Context estimate: {min(512, MAX_LENGTH//2)}")
+        logger.info(f"   - Model type: {type(neuron_model).__name__}")
+        logger.info(f"   - Has generate method: {hasattr(model, 'generate')}")
         
         return model, tokenizer
         
@@ -671,23 +668,72 @@ async def generate_text(request: GenerateRequest):
         attention_mask = attention_mask.to(device)
         
         logger.info(f"Generating text for prompt: {request.prompt[:50]}...")
-        logger.info(f"Model device: {device}, dtype: {dtype}")
         
-        # Use simplified generation approach
-        with torch.no_grad():
-            try:
-                # Use the model's built-in generate method for better compatibility
+        # Check if we're using optimized transformers-neuronx model
+        if TRANSFORMERS_NEURONX_AVAILABLE and hasattr(model, 'generate'):
+            # Use optimized transformers-neuronx generation with HuggingFace API
+            logger.info("🚀 Using optimized transformers-neuronx generation (HF adapter)")
+            
+            with torch.inference_mode():
+                # Reset generation state for the adapter
+                if hasattr(model, 'reset_generation'):
+                    model.reset_generation()
+                
                 generated_ids = model.generate(
                     input_ids,
-                    attention_mask=attention_mask,
                     max_new_tokens=request.max_tokens,
                     temperature=request.temperature,
                     top_p=request.top_p,
                     top_k=request.top_k,
-                    repetition_penalty=request.repetition_penalty,
                     do_sample=True,
                     pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=tokenizer.eos_token_id,
+                    repetition_penalty=request.repetition_penalty
+                )
+        elif TRANSFORMERS_NEURONX_AVAILABLE and hasattr(model, 'model') and hasattr(model.model, 'sample'):
+            # Fallback to direct sample method if HF adapter doesn't work
+            logger.info("🚀 Using optimized transformers-neuronx generation (direct sample)")
+            
+            with torch.inference_mode():
+                generated_sequence = model.model.sample(
+                    input_ids,
+                    sequence_length=min(request.max_tokens + input_ids.shape[1], MAX_LENGTH),
+                    start_ids=None
+                )
+                
+                # Handle the returned sequence
+                if isinstance(generated_sequence, list):
+                    generated_ids = generated_sequence[0]
+                else:
+                    generated_ids = generated_sequence
+        else:
+            # Use standard generation for fallback models
+            logger.info("🔄 Using standard generation method")
+            
+            # Ensure tensors are on correct device
+            device = next(model.parameters()).device
+            dtype = next(model.parameters()).dtype
+            
+            input_ids = input_ids.to(device)
+            attention_mask = attention_mask.to(device)
+            
+            logger.info(f"Model device: {device}, dtype: {dtype}")
+            
+            # Use simplified generation approach
+            with torch.no_grad():
+                try:
+                    # Use the model's built-in generate method for better compatibility
+                    generated_ids = model.generate(
+                        input_ids,
+                        attention_mask=attention_mask,
+                        max_new_tokens=request.max_tokens,
+                        temperature=request.temperature,
+                        top_p=request.top_p,
+                        top_k=request.top_k,
+                        repetition_penalty=request.repetition_penalty,
+                        do_sample=True,
+                        pad_token_id=tokenizer.pad_token_id,
+                        eos_token_id=tokenizer.eos_token_id,
                     use_cache=False,  # Disable KV caching
                     return_dict_in_generate=False
                 )
