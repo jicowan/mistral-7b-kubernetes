@@ -56,6 +56,81 @@ class HealthResponse(BaseModel):
     neuron_cores: int
     device_type: str
 
+def load_tokenizer_with_fallback(model_name):
+    """Load tokenizer with multiple fallback strategies"""
+    logger.info(f"📝 Loading tokenizer for {model_name}...")
+    
+    # Strategy 1: Try standard loading
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        logger.info("✅ Tokenizer loaded successfully (standard method)")
+        return tokenizer
+    except Exception as e:
+        logger.warning(f"⚠️ Standard tokenizer loading failed: {e}")
+    
+    # Strategy 2: Try with legacy format
+    try:
+        logger.info("🔄 Trying tokenizer with legacy format...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name, 
+            trust_remote_code=True,
+            use_fast=False  # Use slow tokenizer as fallback
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        logger.info("✅ Tokenizer loaded successfully (legacy method)")
+        return tokenizer
+    except Exception as e:
+        logger.warning(f"⚠️ Legacy tokenizer loading failed: {e}")
+    
+    # Strategy 3: Try forcing re-download
+    try:
+        logger.info("🔄 Forcing tokenizer re-download...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            force_download=True,  # Force fresh download
+            resume_download=False
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        logger.info("✅ Tokenizer loaded successfully (forced download)")
+        return tokenizer
+    except Exception as e:
+        logger.warning(f"⚠️ Forced download tokenizer loading failed: {e}")
+    
+    # Strategy 4: Try different model with compatible tokenizer
+    fallback_models = [
+        "microsoft/DialoGPT-medium",
+        "gpt2",
+        "distilgpt2"
+    ]
+    
+    for fallback_model in fallback_models:
+        try:
+            logger.info(f"🔄 Trying fallback tokenizer: {fallback_model}")
+            tokenizer = AutoTokenizer.from_pretrained(fallback_model, trust_remote_code=True)
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            logger.warning(f"⚠️ Using fallback tokenizer: {fallback_model}")
+            return tokenizer
+        except Exception as e:
+            logger.warning(f"⚠️ Fallback tokenizer {fallback_model} failed: {e}")
+    
+    # Strategy 5: Last resort - create basic tokenizer
+    try:
+        logger.info("🔄 Creating basic GPT2 tokenizer as last resort...")
+        from transformers import GPT2Tokenizer
+        tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        tokenizer.pad_token = tokenizer.eos_token
+        logger.warning("⚠️ Using basic GPT2 tokenizer - functionality may be limited")
+        return tokenizer
+    except Exception as e:
+        logger.error(f"❌ All tokenizer loading strategies failed: {e}")
+        raise Exception("Failed to load any tokenizer")
+
 def compile_model_for_neuron():
     """Compile the model for Neuron inference - Memory-efficient version with detailed debugging"""
     logger.info("🚀 Starting memory-efficient Neuron compilation with detailed debugging...")
@@ -93,16 +168,12 @@ def compile_model_for_neuron():
     
     log_memory_usage("start")
     
-    # Load tokenizer first (minimal memory)
-    logger.info("📝 Loading tokenizer...")
+    # Load tokenizer with fallback strategies
     try:
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        logger.info("✅ Tokenizer loaded successfully")
+        tokenizer = load_tokenizer_with_fallback(MODEL_NAME)
         log_memory_usage("tokenizer_loaded")
     except Exception as e:
-        logger.error(f"❌ Failed to load tokenizer: {e}")
+        logger.error(f"❌ Failed to load tokenizer with all fallback strategies: {e}")
         return load_cpu_fallback_model()
     
     # Load model on CPU with memory optimization
@@ -349,9 +420,8 @@ def load_cpu_fallback_model():
     """Load CPU fallback model when Neuron compilation fails"""
     logger.info("🔄 Loading CPU fallback model...")
     try:
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
+        # Use robust tokenizer loading
+        tokenizer = load_tokenizer_with_fallback(MODEL_NAME)
         
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,

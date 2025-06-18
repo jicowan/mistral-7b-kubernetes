@@ -50,31 +50,42 @@ spec:
           value: "60"
         - name: AWS_DEFAULT_REGION
           value: "us-west-2"  # Adjust to your region
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hugging-face-token
+              key: token
+        - name: TRANSFORMERS_CACHE
+          value: "/tmp/transformers_cache"
+        - name: HF_HOME
+          value: "/tmp/hf_home"
+        - name: TOKENIZERS_PARALLELISM
+          value: "false"
         resources:
           requests:
             aws.amazon.com/neuron: 1
-            memory: "8Gi"
-            cpu: "4"
+            # memory: "8Gi"
+            # cpu: "4"
           limits:
             aws.amazon.com/neuron: 1
-            memory: "16Gi"
-            cpu: "8"
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 300  # Extended for compilation
-          periodSeconds: 10
-          timeoutSeconds: 30
-          failureThreshold: 5
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 360
-          periodSeconds: 30
-          timeoutSeconds: 30
-          failureThreshold: 3
+            # memory: "16Gi"
+            # cpu: "8"
+        # readinessProbe:
+        #   httpGet:
+        #     path: /health
+        #     port: 8000
+        #   initialDelaySeconds: 300  # Extended for compilation
+        #   periodSeconds: 10
+        #   timeoutSeconds: 30
+        #   failureThreshold: 5
+        # livenessProbe:
+        #   httpGet:
+        #     path: /health
+        #     port: 8000
+        #   initialDelaySeconds: 360
+        #   periodSeconds: 30
+        #   timeoutSeconds: 30
+        #   failureThreshold: 3
         volumeMounts:
         - name: neuron-cache
           mountPath: /tmp/neuron_compiled_model
@@ -87,7 +98,7 @@ spec:
       volumes:
       - name: neuron-cache
         emptyDir:
-          sizeLimit: 10Gi
+          sizeLimit: 20Gi
       - name: neuron-device
         hostPath:
           path: /dev/neuron0
@@ -99,8 +110,8 @@ spec:
           optional: true
       nodeSelector:
         # AWS Inferentia instances
-        node.kubernetes.io/instance-type: inf1.xlarge  # or inf2.xlarge
-        kubernetes.io/arch: amd64
+        node.kubernetes.io/instance-type: inf2.8xlarge  # or inf2.xlarge
+        # kubernetes.io/arch: amd64
       tolerations:
       - key: aws.amazon.com/neuron
         operator: Exists
@@ -121,19 +132,19 @@ spec:
     name: http
   selector:
     app: neuron-mistral-7b-dlc
----
+# ---
 # ServiceMonitor for Prometheus (if using)
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: neuron-mistral-7b-dlc-metrics
-  labels:
-    app: neuron-mistral-7b-dlc
-spec:
-  selector:
-    matchLabels:
-      app: neuron-mistral-7b-dlc
-  endpoints:
-  - port: http
-    path: /metrics
-    interval: 30s
+# apiVersion: monitoring.coreos.com/v1
+# kind: ServiceMonitor
+# metadata:
+#   name: neuron-mistral-7b-dlc-metrics
+#   labels:
+#     app: neuron-mistral-7b-dlc
+# spec:
+#   selector:
+#     matchLabels:
+#       app: neuron-mistral-7b-dlc
+#   endpoints:
+#   - port: http
+#     path: /metrics
+#     interval: 30s

@@ -40,7 +40,9 @@ spec:
         - name: NEURON_RT_NUM_CORES
           value: "2"
         - name: NEURON_CC_FLAGS
-          value: "--model-type=transformer-inference --optlevel=1"
+          value: "--model-type=transformer-inference --optlevel=1 --tensor-parallel-size=2"
+        - name: TENSOR_PARALLEL_SIZE
+          value: '2'
         - name: HF_TOKEN
           valueFrom:
             secretKeyRef:
@@ -49,28 +51,8 @@ spec:
         resources:
           requests:
             aws.amazon.com/neuron: 1  # Request 1 Neuron device
-            # memory: "32Gi"
-            # cpu: "8"
           limits:
             aws.amazon.com/neuron: 1
-            # memory: "64Gi"
-            # cpu: "16"
-        # readinessProbe:
-        #   httpGet:
-        #     path: /health
-        #     port: 8000
-        #   initialDelaySeconds: 300  # Longer due to compilation time
-        #   periodSeconds: 10
-        #   timeoutSeconds: 30
-        #   failureThreshold: 5
-        # livenessProbe:
-        #   httpGet:
-        #     path: /health
-        #     port: 8000
-        #   initialDelaySeconds: 360  # Even longer for liveness
-        #   periodSeconds: 30
-        #   timeoutSeconds: 30
-        #   failureThreshold: 3
         volumeMounts:
         - name: neuron-cache
           mountPath: /tmp/neuron_compiled_model

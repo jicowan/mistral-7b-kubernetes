@@ -33,10 +33,10 @@ RUN pip install \
     pydantic==2.5.0 \
     requests==2.31.0
 
-# Install additional ML dependencies if needed
-# (Most are already in the Neuron DLC)
-RUN pip install \
-    transformers==4.36.2 \
+# Install additional ML dependencies with updated versions for tokenizer compatibility
+RUN pip install --upgrade \
+    transformers>=4.35.0 \
+    tokenizers>=0.15.0 \
     accelerate==0.24.1 \
     sentencepiece==0.1.99
 
