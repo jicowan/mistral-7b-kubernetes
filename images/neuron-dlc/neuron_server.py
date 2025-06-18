@@ -770,11 +770,22 @@ async def generate_text(request: GenerateRequest):
             # Use optimized transformers-neuronx generation with direct sample method
             logger.info("🚀 Using optimized transformers-neuronx generation (direct sample)")
             
+            # Validate and clamp parameters to prevent numerical issues
+            temperature = max(0.1, min(2.0, request.temperature))  # Clamp between 0.1 and 2.0
+            top_p = max(0.1, min(1.0, request.top_p))              # Clamp between 0.1 and 1.0
+            top_k = max(1, min(100, request.top_k))                # Clamp between 1 and 100
+            
+            logger.info(f"Using sampling parameters: temp={temperature}, top_p={top_p}, top_k={top_k}")
+            
             with torch.inference_mode():
                 generated_sequence = model.sample(
                     input_ids,
                     sequence_length=min(request.max_tokens + input_ids.shape[1], MAX_LENGTH),
-                    start_ids=None
+                    start_ids=None,
+                    top_k=top_k,
+                    top_p=top_p,
+                    temperature=temperature,
+                    eos_token_override=tokenizer.eos_token_id
                 )
                 
                 # Handle the returned sequence
