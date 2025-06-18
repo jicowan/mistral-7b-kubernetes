@@ -83,8 +83,7 @@ def load_optimized_neuron_model():
         
         # Use the official NeuronAutoModelForCausalLM API
         logger.info("🔧 Loading model with NeuronAutoModelForCausalLM...")
-        from transformers_neuronx import NeuronAutoModelForCausalLM, HuggingFaceGenerationModelAdapter
-        from transformers import AutoConfig
+        from transformers_neuronx import NeuronAutoModelForCausalLM
         
         # Load model with correct tensor parallelism configuration
         neuron_model = NeuronAutoModelForCausalLM.from_pretrained(
@@ -101,11 +100,7 @@ def load_optimized_neuron_model():
         logger.info("⚙️ Compiling model for Neuron (this may take several minutes)...")
         neuron_model.to_neuron()
         
-        # Wrap with HuggingFace adapter for generate() API
-        logger.info("🔧 Setting up HuggingFace generation adapter...")
-        config = AutoConfig.from_pretrained(MODEL_NAME)
-        model = HuggingFaceGenerationModelAdapter(config, neuron_model)
-        
+        # Return the neuron model directly (no HuggingFace adapter due to transformers 4.50+ compatibility issue)
         logger.info("✅ Optimized Neuron model loaded successfully")
         logger.info(f"📊 Model configuration:")
         logger.info(f"   - Batch size: {BATCH_SIZE}")
@@ -115,9 +110,9 @@ def load_optimized_neuron_model():
         logger.info(f"   - Precision: bfloat16")
         logger.info(f"   - Context estimate: {min(512, MAX_LENGTH//2)}")
         logger.info(f"   - Model type: {type(neuron_model).__name__}")
-        logger.info(f"   - Has generate method: {hasattr(model, 'generate')}")
+        logger.info(f"   - Has sample method: {hasattr(neuron_model, 'sample')}")
         
-        return model, tokenizer
+        return neuron_model, tokenizer
         
     except Exception as e:
         logger.error(f"❌ Failed to load optimized Neuron model: {e}")
@@ -771,32 +766,12 @@ async def generate_text(request: GenerateRequest):
         logger.info(f"Generating text for prompt: {request.prompt[:50]}...")
         
         # Check if we're using optimized transformers-neuronx model
-        if TRANSFORMERS_NEURONX_AVAILABLE and hasattr(model, 'generate'):
-            # Use optimized transformers-neuronx generation with HuggingFace API
-            logger.info("🚀 Using optimized transformers-neuronx generation (HF adapter)")
-            
-            with torch.inference_mode():
-                # Reset generation state for the adapter
-                if hasattr(model, 'reset_generation'):
-                    model.reset_generation()
-                
-                generated_ids = model.generate(
-                    input_ids,
-                    max_new_tokens=request.max_tokens,
-                    temperature=request.temperature,
-                    top_p=request.top_p,
-                    top_k=request.top_k,
-                    do_sample=True,
-                    pad_token_id=tokenizer.pad_token_id,
-                    eos_token_id=tokenizer.eos_token_id,
-                    repetition_penalty=request.repetition_penalty
-                )
-        elif TRANSFORMERS_NEURONX_AVAILABLE and hasattr(model, 'model') and hasattr(model.model, 'sample'):
-            # Fallback to direct sample method if HF adapter doesn't work
+        if TRANSFORMERS_NEURONX_AVAILABLE and hasattr(model, 'sample'):
+            # Use optimized transformers-neuronx generation with direct sample method
             logger.info("🚀 Using optimized transformers-neuronx generation (direct sample)")
             
             with torch.inference_mode():
-                generated_sequence = model.model.sample(
+                generated_sequence = model.sample(
                     input_ids,
                     sequence_length=min(request.max_tokens + input_ids.shape[1], MAX_LENGTH),
                     start_ids=None

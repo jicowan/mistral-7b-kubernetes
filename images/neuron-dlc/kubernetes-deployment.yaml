@@ -42,7 +42,7 @@ spec:
         - name: NEURON_RT_NUM_CORES
           value: "2"
         - name: NEURON_CC_FLAGS
-          value: "--model-type=transformer-inference --optlevel=1 --tensor-parallel-size=2"
+          value: "--model-type=transformer --distribution-strategy=llm-training --optlevel=1"
         - name: HF_HOME
           value: "/tmp/hf_home"
         - name: TOKENIZERS_PARALLELISM
