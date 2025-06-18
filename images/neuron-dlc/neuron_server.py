@@ -644,96 +644,173 @@ def load_compiled_model():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize and cleanup the Neuron model with proper error handling"""
+    """Initialize and cleanup the Neuron model with robust error handling for Inferentia2"""
     global model, tokenizer
     
-    logger.info("🚀 Starting Neuron model initialization...")
+    logger.info("🚀 Starting Neuron model initialization on Inferentia2...")
+    
+    # Force immediate log flush to ensure we see startup messages
+    import sys
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
+    model_loaded = False
     
     # First, try the optimized transformers-neuronx approach
-    try:
-        logger.info("🔧 Attempting optimized transformers-neuronx loading...")
-        model, tokenizer = load_optimized_neuron_model()
-        
-        if model is not None and tokenizer is not None:
-            logger.info("✅ Optimized transformers-neuronx model loaded successfully!")
-            logger.info(f"📊 Model: {MODEL_NAME}")
-            logger.info(f"🔧 Model type: {type(model).__name__}")
-            logger.info(f"🎯 Has sample method: {hasattr(model, 'sample')}")
-            logger.info(f"🚀 Max length: {MAX_LENGTH}")
-            logger.info("🎯 Server ready for optimized Neuron inference!")
+    if not model_loaded:
+        try:
+            logger.info("🔧 Attempting optimized transformers-neuronx loading...")
+            sys.stdout.flush()
             
-            yield
-            return
-        else:
-            logger.warning("⚠️ Optimized transformers-neuronx returned None, trying fallback...")
-            
-    except Exception as e:
-        logger.error(f"❌ Optimized transformers-neuronx failed: {e}")
-        logger.info("🔄 Trying torch_neuronx fallback...")
+            result = load_optimized_neuron_model()
+            if result and len(result) == 2:
+                temp_model, temp_tokenizer = result
+                if temp_model is not None and temp_tokenizer is not None:
+                    model = temp_model
+                    tokenizer = temp_tokenizer
+                    model_loaded = True
+                    
+                    logger.info("✅ Optimized transformers-neuronx model loaded successfully!")
+                    logger.info(f"📊 Model: {MODEL_NAME}")
+                    logger.info(f"🔧 Model type: {type(model).__name__}")
+                    logger.info(f"🔧 Model module: {model.__class__.__module__}")
+                    logger.info(f"🎯 Has sample method: {hasattr(model, 'sample')}")
+                    logger.info(f"🚀 Max length: {MAX_LENGTH}")
+                    logger.info("🎯 Server ready for optimized Neuron inference!")
+                    sys.stdout.flush()
+                else:
+                    logger.warning("⚠️ Optimized transformers-neuronx returned None models")
+            else:
+                logger.warning("⚠️ Optimized transformers-neuronx returned invalid result")
+                
+        except Exception as e:
+            logger.error(f"❌ Optimized transformers-neuronx failed: {e}")
+            logger.error(f"🔍 Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"🔍 Traceback: {traceback.format_exc()}")
+            sys.stdout.flush()
     
     # Second, try torch_neuronx approach
-    try:
-        logger.info("🔧 Attempting torch_neuronx compilation...")
-        model, tokenizer = compile_model_for_neuron()
-        
-        if model is not None and tokenizer is not None:
-            logger.info("✅ torch_neuronx model compiled successfully!")
+    if not model_loaded:
+        try:
+            logger.info("🔧 Attempting torch_neuronx compilation...")
+            sys.stdout.flush()
+            
+            result = compile_model_for_neuron()
+            if result and len(result) == 2:
+                temp_model, temp_tokenizer = result
+                if temp_model is not None and temp_tokenizer is not None:
+                    model = temp_model
+                    tokenizer = temp_tokenizer
+                    model_loaded = True
+                    
+                    logger.info("✅ torch_neuronx model compiled successfully!")
+                    logger.info(f"📊 Model: {MODEL_NAME}")
+                    logger.info(f"🔧 Model type: {type(model).__name__}")
+                    logger.info(f"🔧 Model module: {model.__class__.__module__}")
+                    logger.info(f"🎯 Has generate method: {hasattr(model, 'generate')}")
+                    logger.info(f"🚀 Max length: {MAX_LENGTH}")
+                    logger.info("🎯 Server ready for torch_neuronx inference!")
+                    sys.stdout.flush()
+                else:
+                    logger.warning("⚠️ torch_neuronx returned None models")
+            else:
+                logger.warning("⚠️ torch_neuronx returned invalid result")
+                
+        except Exception as e:
+            logger.error(f"❌ torch_neuronx compilation failed: {e}")
+            logger.error(f"🔍 Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"🔍 Traceback: {traceback.format_exc()}")
+            sys.stdout.flush()
+    
+    # Third, try to load any pre-compiled Neuron model
+    if not model_loaded:
+        try:
+            logger.info("🔧 Attempting to load pre-compiled Neuron model...")
+            sys.stdout.flush()
+            
+            if os.path.exists(f"{COMPILED_MODEL_PATH}/neuron_model.pt"):
+                result = load_compiled_model()
+                if result and len(result) == 2:
+                    temp_model, temp_tokenizer = result
+                    if temp_model is not None and temp_tokenizer is not None:
+                        model = temp_model
+                        tokenizer = temp_tokenizer
+                        model_loaded = True
+                        
+                        logger.info("✅ Pre-compiled Neuron model loaded successfully!")
+                        logger.info(f"📊 Model: {MODEL_NAME}")
+                        logger.info(f"🔧 Model type: {type(model).__name__}")
+                        logger.info("🎯 Server ready for pre-compiled Neuron inference!")
+                        sys.stdout.flush()
+                    else:
+                        logger.warning("⚠️ Pre-compiled model loading returned None models")
+                else:
+                    logger.warning("⚠️ Pre-compiled model loading returned invalid result")
+            else:
+                logger.info("ℹ️ No pre-compiled model found")
+                
+        except Exception as e:
+            logger.error(f"❌ Pre-compiled model loading failed: {e}")
+            logger.error(f"🔍 Error type: {type(e).__name__}")
+            sys.stdout.flush()
+    
+    # Final fallback: Stable CPU model (optimized for Inferentia2)
+    if not model_loaded:
+        try:
+            logger.info("🔧 Loading CPU fallback model optimized for Inferentia2...")
+            sys.stdout.flush()
+            
+            # Load tokenizer with proper configuration
+            tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            
+            # Use bfloat16 instead of float16 for better numerical stability (based on GitHub issue)
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME,
+                torch_dtype=torch.bfloat16,  # Use bfloat16 for better stability on Inferentia2
+                device_map="cpu",
+                low_cpu_mem_usage=True,
+                trust_remote_code=True
+            )
+            
+            model_loaded = True
+            
+            logger.warning("⚠️ Running on CPU fallback with bfloat16 - performance will be limited")
+            logger.info("✅ CPU fallback model loaded successfully!")
             logger.info(f"📊 Model: {MODEL_NAME}")
             logger.info(f"🔧 Model type: {type(model).__name__}")
+            logger.info(f"🔧 Model dtype: {next(model.parameters()).dtype}")
             logger.info(f"🎯 Has generate method: {hasattr(model, 'generate')}")
-            logger.info(f"🚀 Max length: {MAX_LENGTH}")
-            logger.info("🎯 Server ready for torch_neuronx inference!")
+            logger.info("🎯 Server ready for CPU inference on Inferentia2!")
+            sys.stdout.flush()
             
-            yield
-            return
-        else:
-            logger.warning("⚠️ torch_neuronx returned None, trying CPU fallback...")
-            
-    except Exception as e:
-        logger.error(f"❌ torch_neuronx compilation failed: {e}")
-        logger.info("🔄 Falling back to CPU model...")
+        except Exception as cpu_error:
+            logger.error(f"❌ CPU fallback also failed: {cpu_error}")
+            logger.error(f"🔍 Error type: {type(cpu_error).__name__}")
+            import traceback
+            logger.error(f"🔍 Traceback: {traceback.format_exc()}")
+            sys.stdout.flush()
     
-    # Final fallback: CPU model with proper configuration
-    try:
-        logger.info("🔧 Loading CPU fallback model with optimized settings...")
+    # Final check and error handling
+    if not model_loaded or model is None or tokenizer is None:
+        logger.error("💥 CRITICAL: All model loading approaches failed!")
+        logger.error("🚨 Server starting without model - all requests will fail")
         
-        # Load tokenizer
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        
-        # Load model with optimized settings for stability
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_NAME,
-            torch_dtype=torch.float16,  # Use float16 instead of float32 for better stability
-            device_map="cpu",
-            low_cpu_mem_usage=True,
-            trust_remote_code=True
-        )
-        
-        # Move to CPU explicitly
-        model = model.to("cpu")
-        
-        logger.warning("⚠️ Running on CPU with float16 - performance will be limited")
-        logger.info("✅ CPU fallback model loaded successfully!")
-        logger.info(f"📊 Model: {MODEL_NAME}")
-        logger.info(f"🔧 Model type: {type(model).__name__}")
-        logger.info(f"🎯 Has generate method: {hasattr(model, 'generate')}")
-        logger.info("🎯 Server ready for CPU inference!")
-        
-        yield
-        
-    except Exception as cpu_error:
-        logger.error(f"❌ CPU fallback also failed: {cpu_error}")
-        logger.error("💥 All model loading approaches failed!")
-        
-        # Set dummy model to prevent crashes
+        # Set dummy values to prevent None errors
         model = None
         tokenizer = None
-        
-        logger.error("🚨 Server starting without model - all requests will fail")
-        yield
+        sys.stdout.flush()
+    else:
+        logger.info("🎉 Model initialization completed successfully!")
+        logger.info(f"✅ Final model type: {type(model).__name__}")
+        logger.info(f"✅ Final tokenizer type: {type(tokenizer).__name__}")
+        sys.stdout.flush()
     
+    try:
+        yield
     finally:
         # Cleanup
         logger.info("🧹 Cleaning up resources...")
@@ -745,6 +822,7 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Cleanup completed")
         except Exception as cleanup_error:
             logger.error(f"⚠️ Cleanup error: {cleanup_error}")
+        sys.stdout.flush()
 
 # Create FastAPI app with lifespan
 app = FastAPI(

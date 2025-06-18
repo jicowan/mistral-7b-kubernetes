@@ -207,7 +207,7 @@ def compile_model_fallback():
         logger.info("🔄 Loading model on CPU for fallback compilation...")
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,
-            torch_dtype=torch.float32,
+            torch_dtype=torch.bfloat16,  # Use bfloat16 for better stability on Inferentia2
             low_cpu_mem_usage=True,
             trust_remote_code=True
         )
@@ -297,7 +297,7 @@ def compile_model_for_neuron_fallback():
         # Use minimal memory loading
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,
-            torch_dtype=torch.float32,  # Start with float32, will optimize later
+            torch_dtype=torch.bfloat16,  # Use bfloat16 for better stability on Inferentia2
             low_cpu_mem_usage=True,
             trust_remote_code=True,
             device_map="cpu",  # Explicitly keep on CPU initially
@@ -541,7 +541,7 @@ def load_cpu_fallback_model():
         
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,
-            torch_dtype=torch.float32,  # Changed from float16 to float32 for CPU compatibility
+            torch_dtype=torch.bfloat16,  # Use bfloat16 for better stability on Inferentia2
             device_map="cpu",
             low_cpu_mem_usage=True,
             trust_remote_code=True
@@ -573,7 +573,12 @@ async def lifespan(app: FastAPI):
     """Initialize and cleanup the Neuron model with proper error handling"""
     global model, tokenizer
     
-    logger.info("🚀 Starting Neuron model initialization...")
+    logger.info("🚀 Starting Neuron model initialization on Inferentia2...")
+    
+    # Force immediate log flush to ensure we see startup messages
+    import sys
+    sys.stdout.flush()
+    sys.stderr.flush()
     
     # First, try the optimized transformers-neuronx approach
     try:
