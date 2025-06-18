@@ -26,9 +26,14 @@ except ImportError as e:
     logger = logging.getLogger(__name__)
     logger.warning(f"⚠️ transformers-neuronx not available: {e}")
     logger.info("🔄 Falling back to standard transformers with torch_neuronx")
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    import torch_neuronx
     TRANSFORMERS_NEURONX_AVAILABLE = False
+
+# Always import these for fallback functionality
+from transformers import AutoTokenizer, AutoModelForCausalLM
+try:
+    import torch_neuronx
+except ImportError:
+    logger.warning("⚠️ torch_neuronx not available - CPU-only mode")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -181,7 +186,30 @@ def load_optimized_neuron_model():
 def compile_model_fallback():
     """Fallback compilation using torch_neuronx when transformers-neuronx fails"""
     logger.info("🔄 Using fallback torch_neuronx compilation...")
-    return load_cpu_fallback_model()
+    
+    try:
+        # Load tokenizer
+        tokenizer = load_tokenizer_with_fallback(MODEL_NAME)
+        
+        # Load model on CPU first
+        logger.info("🔄 Loading model on CPU for fallback compilation...")
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            torch_dtype=torch.float32,
+            low_cpu_mem_usage=True,
+            trust_remote_code=True
+        )
+        
+        # For now, just use CPU fallback instead of complex torch_neuronx compilation
+        model = model.to('cpu')
+        logger.info("✅ Fallback model loaded on CPU")
+        logger.warning("⚠️ Using CPU fallback - performance will be limited")
+        
+        return model, tokenizer
+        
+    except Exception as e:
+        logger.error(f"❌ Fallback compilation failed: {e}")
+        return load_cpu_fallback_model()
 
 def compile_model_for_neuron():
     """Compile the model for Neuron inference - Memory-efficient version with detailed debugging"""
